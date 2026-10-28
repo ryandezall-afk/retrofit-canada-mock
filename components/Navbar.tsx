@@ -14,6 +14,7 @@ export function Navbar() {
     { label: 'LEARN', href: '/learn' },
     { label: 'NEWS', href: '/news' },
     { label: 'EVENTS', href: '/events' },
+    { label: 'RETROFIT AI', href: '/retrofit-ai' },
     { label: 'ABOUT', href: '/about' },
     { label: 'CONTACT', href: '/contact' },
   ];
@@ -39,12 +40,12 @@ export function Navbar() {
         </Link>
 
         {/* Desktop Navigation Links */}
-        <nav className="hidden lg:flex items-center gap-8 text-[15px] font-medium tracking-wide">
+        <nav className="hidden lg:flex items-center gap-6 xl:gap-8 text-[15px] font-medium tracking-wide">
           {navLinks.map((link) => (
             <Link
               key={link.href}
               href={link.href}
-              className={`transition-colors uppercase font-roboto ${
+              className={`transition-colors uppercase font-roboto whitespace-nowrap ${
                 isActive(link.href)
                   ? 'text-[#ea3f3f] font-bold border-b-2 border-[#ea3f3f] pb-1'
                   : 'text-[#2e3249] hover:text-[#faa627]'
