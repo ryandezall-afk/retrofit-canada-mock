@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 // Replace the body with the advisor UI when it's ready.
 export default function RetrofitAiPage() {
   return (
-    <main className="max-w-[1340px] mx-auto px-6 lg:px-12 py-20">
+    <section className="max-w-[1340px] mx-auto px-6 lg:px-12 py-20">
       <h1 className="font-saira text-4xl sm:text-5xl font-bold text-[#2e3249]">
         Retrofit AI
       </h1>
@@ -21,6 +21,6 @@ export default function RetrofitAiPage() {
       <p className="mt-10 inline-block rounded-lg bg-[#2e3249] px-5 py-3 text-sm font-semibold text-white">
         Coming soon
       </p>
-    </main>
+    </section>
   );
 }

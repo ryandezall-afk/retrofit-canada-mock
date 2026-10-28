@@ -1,5 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
+import { ArrowRight } from 'lucide-react';
 
 export default function HomePage() {
   return (
@@ -33,6 +34,24 @@ export default function HomePage() {
               <p>
                 We can’t address climate change just by building new net-zero homes. We need solutions that make the homes we live in right now net-zero to preserve a livable climate. Deep Retrofits are the solution.
               </p>
+
+
+              {/* Retrofit AI call-to-action */}
+              <div className="border-t border-white/25 pt-6 space-y-4">
+                <p className="font-saira text-xl sm:text-2xl font-semibold text-white leading-snug">
+                  Get your personalized retrofit assessment now?
+                </p>
+                <Link
+                  href="/retrofit-ai"
+                  className="group inline-flex items-center gap-2 bg-[#faa627] hover:bg-white text-[#2e3249] font-roboto font-bold text-sm sm:text-base px-7 py-3 rounded-[10px] shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#2e3249]"
+                >
+                  Start my assessment
+                  <ArrowRight
+                    aria-hidden="true"
+                    className="w-4 h-4 transition-transform group-hover:translate-x-1"
+                  />
+                </Link>
+              </div>
             </div>
           </div>
         </div>
