@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import SuitabilityCheck, {
   type SuitabilityAnswers,
@@ -103,30 +103,48 @@ export default function RetrofitForm() {
       timeline: "",
     });
 
+  // Points at the top of the form card so we can scroll back to it
+  // whenever the user moves between steps.
+  const formTopRef = useRef<HTMLDivElement>(null);
+
+  const scrollToFormTop = () => {
+    formTopRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  };
+
   const nextStep = () => {
     if (currentStep < steps.length - 1) {
       setCurrentStep((previous) => previous + 1);
+      scrollToFormTop();
     }
   };
 
   const previousStep = () => {
     if (currentStep > 0) {
       setCurrentStep((previous) => previous - 1);
+      scrollToFormTop();
     }
   };
 
   const editStep = (step: number) => {
     setCurrentStep(step);
+    scrollToFormTop();
   };
 
   const completeAssessment = () => {
     // Prototype only. No backend or AI request is made.
     setIsComplete(true);
+    scrollToFormTop();
   };
 
   if (isComplete) {
     return (
-      <div className="mt-10 rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm sm:p-12">
+      <div
+        ref={formTopRef}
+        className="mt-10 scroll-mt-28 rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm sm:p-12"
+      >
         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-3xl text-green-700">
           ✓
         </div>
@@ -169,6 +187,7 @@ export default function RetrofitForm() {
           onClick={() => {
             setIsComplete(false);
             setCurrentStep(6);
+            scrollToFormTop();
           }}
           className="mt-8 rounded-lg bg-[#2e3249] px-6 py-3 font-semibold text-white transition hover:bg-[#404660]"
         >
@@ -179,7 +198,10 @@ export default function RetrofitForm() {
   }
 
   return (
-    <div className="mt-10 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+    <div
+      ref={formTopRef}
+      className="mt-10 scroll-mt-28 rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
+    >
       {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <h2 className="font-saira text-xl font-bold text-[#2e3249]">
