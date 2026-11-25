@@ -96,3 +96,61 @@ export interface NewsArticle {
   excerpt: string;
   content: string;
 }
+
+export type QuestionType = "single_choice" | "multi_choice" | "text" | "number";
+
+export type AnswerValue = string | string[];
+
+export type QuestionnaireAnswers = Record<string, AnswerValue>;
+
+export interface QuestionImage {
+  src: string;
+  alt: string;
+  caption?: string;
+}
+
+export interface QuestionOption {
+  value: string;
+  label: string;
+  image?: QuestionImage;
+  exclusive?: boolean;
+}
+
+export interface QuestionCondition {
+  questionId: string;
+  equals?: string;
+  notEquals?: string;
+  notIn?: string[];
+}
+
+export interface QuestionUnitOption {
+  value: string;
+  label: string;
+}
+
+export interface QuestionConfig {
+  id: string;
+  section: string;
+  reviewLabel: string;
+  prompt: string;
+  description?: string;
+  type: QuestionType;
+  required?: boolean;
+  allowUnknown?: boolean;
+  unknownLabel?: string;
+  options?: QuestionOption[];
+  examples?: QuestionImage[];
+  placeholder?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  maxLength?: number;
+  uppercase?: boolean;
+  prefix?: string;
+  suffix?: string;
+  unitField?: string;
+  defaultUnit?: string;
+  unitOptions?: QuestionUnitOption[];
+  excludeSelectedFrom?: string;
+  showIf?: QuestionCondition;
+}
