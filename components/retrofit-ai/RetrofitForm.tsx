@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import {
   assessmentQuestions,
   getVisibleQuestions,
@@ -10,6 +10,124 @@ import type { AnswerValue, QuestionConfig, QuestionnaireAnswers } from "@/types"
 import QuestionCard from "./QuestionCard";
 import AssessmentReview from "./AssessmentReview";
 
+const DRAFT_STORAGE_KEY = "retrofit_ai_session_draft";
+const DEFAULT_ANSWERS: QuestionnaireAnswers = { floorAreaUnit: "sqft" };
+
+interface DraftState {
+  answers: QuestionnaireAnswers;
+  currentIndex: number;
+  isComplete: boolean;
+}
+
+const draftListeners = new Set<() => void>();
+
+function notifyDraftListeners() {
+  draftListeners.forEach((listener) => listener());
+}
+
+function subscribeDraft(listener: () => void) {
+  draftListeners.add(listener);
+  return () => {
+    draftListeners.delete(listener);
+  };
+}
+
+function getDraftSnapshot(): string | null {
+  try {
+    return sessionStorage.getItem(DRAFT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function getServerDraftSnapshot(): string | null {
+  return null;
+}
+
+function writeDraft(draft: DraftState) {
+  try {
+    sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  } catch {
+    // Ignore storage quota or privacy-mode errors
+  }
+  notifyDraftListeners();
+}
+
+function clearDraft() {
+  try {
+    sessionStorage.removeItem(DRAFT_STORAGE_KEY);
+  } catch {
+    // Ignore storage errors
+  }
+  notifyDraftListeners();
+}
+
+function sanitizeAnswers(
+  raw: unknown,
+  questions: QuestionConfig[]
+): QuestionnaireAnswers {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { ...DEFAULT_ANSWERS };
+  }
+
+  const allowedKeys = new Set<string>();
+  for (const q of questions) {
+    allowedKeys.add(q.id);
+    if (q.unitField) allowedKeys.add(q.unitField);
+  }
+
+  const sanitized: QuestionnaireAnswers = { ...DEFAULT_ANSWERS };
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!allowedKeys.has(key)) continue;
+    if (typeof value === "string") {
+      sanitized[key] = value;
+    } else if (
+      Array.isArray(value) &&
+      value.every((item) => typeof item === "string")
+    ) {
+      sanitized[key] = value;
+    }
+  }
+
+  return sanitized;
+}
+
+function parseDraft(
+  raw: string | null,
+  questions: QuestionConfig[]
+): DraftState {
+  if (!raw) {
+    return {
+      answers: { ...DEFAULT_ANSWERS },
+      currentIndex: 0,
+      isComplete: false,
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<DraftState>;
+    const answers = sanitizeAnswers(parsed.answers, questions);
+    const visible = getVisibleQuestions(questions, answers);
+    const currentIndex =
+      typeof parsed.currentIndex === "number" &&
+      Number.isInteger(parsed.currentIndex)
+        ? Math.max(0, Math.min(parsed.currentIndex, visible.length))
+        : 0;
+
+    return {
+      answers,
+      currentIndex,
+      isComplete: Boolean(parsed.isComplete),
+    };
+  } catch {
+    return {
+      answers: { ...DEFAULT_ANSWERS },
+      currentIndex: 0,
+      isComplete: false,
+    };
+  }
+}
+
 interface RetrofitFormProps {
   questions?: QuestionConfig[];
 }
@@ -17,13 +135,15 @@ interface RetrofitFormProps {
 export default function RetrofitForm({
   questions = assessmentQuestions,
 }: RetrofitFormProps) {
-  const [answers, setAnswers] = useState<QuestionnaireAnswers>({
-    floorAreaUnit: "sqft",
-  });
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [isComplete, setIsComplete] = useState(false);
+  const rawDraft = useSyncExternalStore(
+    subscribeDraft,
+    getDraftSnapshot,
+    getServerDraftSnapshot
+  );
+  const draft = parseDraft(rawDraft, questions);
+  const { answers, currentIndex, isComplete } = draft;
 
+  const [error, setError] = useState<string | null>(null);
   const formTopRef = useRef<HTMLDivElement>(null);
 
   const visibleQuestions = getVisibleQuestions(questions, answers);
@@ -39,25 +159,32 @@ export default function RetrofitForm({
     });
   };
 
+  const resetAssessment = () => {
+    setError(null);
+    clearDraft();
+    scrollToFormTop();
+  };
+
   const updateAnswer = (questionId: string, value: AnswerValue) => {
     setError(null);
-    setAnswers((prev) => {
-      const next: QuestionnaireAnswers = { ...prev, [questionId]: value };
+    const nextAnswers: QuestionnaireAnswers = {
+      ...answers,
+      [questionId]: value,
+    };
 
-      if (questionId === "foundationType" && value === "Slab-on-grade") {
-        next.basementInsulation = "";
-      }
+    if (questionId === "foundationType" && value === "Slab-on-grade") {
+      nextAnswers.basementInsulation = "";
+    }
 
-      if (questionId === "yearBuilt" && value !== "Enter exact year") {
-        next.exactYear = "";
-      }
+    if (questionId === "yearBuilt" && value !== "Enter exact year") {
+      nextAnswers.exactYear = "";
+    }
 
-      if (questionId === "firstPriority" && value === prev.secondPriority) {
-        next.secondPriority = "";
-      }
+    if (questionId === "firstPriority" && value === answers.secondPriority) {
+      nextAnswers.secondPriority = "";
+    }
 
-      return next;
-    });
+    writeDraft({ answers: nextAnswers, currentIndex: safeIndex, isComplete });
   };
 
   const nextQuestion = () => {
@@ -74,15 +201,19 @@ export default function RetrofitForm({
 
     setError(null);
     if (safeIndex < totalQuestions) {
-      setCurrentIndex(safeIndex + 1);
+      writeDraft({ answers, currentIndex: safeIndex + 1, isComplete: false });
       scrollToFormTop();
     }
   };
 
   const skipOptionalQuestion = () => {
-    if (currentQuestion && !currentQuestion.required && safeIndex < totalQuestions) {
+    if (
+      currentQuestion &&
+      !currentQuestion.required &&
+      safeIndex < totalQuestions
+    ) {
       setError(null);
-      setCurrentIndex(safeIndex + 1);
+      writeDraft({ answers, currentIndex: safeIndex + 1, isComplete: false });
       scrollToFormTop();
     }
   };
@@ -90,7 +221,7 @@ export default function RetrofitForm({
   const previousQuestion = () => {
     if (safeIndex > 0) {
       setError(null);
-      setCurrentIndex(safeIndex - 1);
+      writeDraft({ answers, currentIndex: safeIndex - 1, isComplete: false });
       scrollToFormTop();
     }
   };
@@ -99,7 +230,7 @@ export default function RetrofitForm({
     const index = visibleQuestions.findIndex((q) => q.id === questionId);
     if (index !== -1) {
       setError(null);
-      setCurrentIndex(index);
+      writeDraft({ answers, currentIndex: index, isComplete: false });
       scrollToFormTop();
     }
   };
@@ -111,7 +242,11 @@ export default function RetrofitForm({
 
     if (firstInvalidIndex !== -1) {
       const invalidQuestion = visibleQuestions[firstInvalidIndex];
-      setCurrentIndex(firstInvalidIndex);
+      writeDraft({
+        answers,
+        currentIndex: firstInvalidIndex,
+        isComplete: false,
+      });
       setError(validateQuestion(invalidQuestion, answers[invalidQuestion.id]));
       scrollToFormTop();
       return;
@@ -119,7 +254,7 @@ export default function RetrofitForm({
 
     // Prototype only. No backend or AI request is made.
     setError(null);
-    setIsComplete(true);
+    writeDraft({ answers, currentIndex: safeIndex, isComplete: true });
     scrollToFormTop();
   };
 
@@ -164,17 +299,30 @@ export default function RetrofitForm({
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            setIsComplete(false);
-            setCurrentIndex(totalQuestions);
-            scrollToFormTop();
-          }}
-          className="mt-6 w-full rounded-xl bg-rc-navy px-6 py-3.5 font-semibold text-white transition hover:bg-[#404660]"
-        >
-          Review My Answers
-        </button>
+        <div className="mt-6 flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              writeDraft({
+                answers,
+                currentIndex: totalQuestions,
+                isComplete: false,
+              });
+              scrollToFormTop();
+            }}
+            className="w-full rounded-xl bg-rc-navy px-6 py-3.5 font-semibold text-white transition hover:bg-[#404660]"
+          >
+            Review My Answers
+          </button>
+
+          <button
+            type="button"
+            onClick={resetAssessment}
+            className="w-full rounded-xl border border-slate-300 px-6 py-3 text-sm font-semibold text-rc-navy transition hover:bg-slate-100"
+          >
+            Start Over
+          </button>
+        </div>
       </div>
     );
   }
@@ -201,11 +349,23 @@ export default function RetrofitForm({
           {currentQuestion ? currentQuestion.section : "Assessment Summary"}
         </span>
 
-        <span className="shrink-0 text-xs font-semibold text-slate-500">
-          {isReviewStep
-            ? "Final Review"
-            : `${safeIndex + 1} / ${totalQuestions}`}
-        </span>
+        <div className="flex shrink-0 items-center gap-3">
+          {(safeIndex > 0 || Object.keys(answers).length > 1) && (
+            <button
+              type="button"
+              onClick={resetAssessment}
+              className="text-xs font-medium text-slate-400 underline hover:text-rc-red"
+            >
+              Reset
+            </button>
+          )}
+
+          <span className="text-xs font-semibold text-slate-500">
+            {isReviewStep
+              ? "Final Review"
+              : `${safeIndex + 1} / ${totalQuestions}`}
+          </span>
+        </div>
       </div>
 
       {/* Progress bar */}
