@@ -98,6 +98,13 @@ export const assessmentQuestions: QuestionConfig[] = [
     prompt: "How long do you expect to stay in this home?",
     type: "single_choice",
     required: true,
+    examples: [
+      {
+        src: "https://portal.retrofitcanada.com/storage/caseStudy/47/images/cqnAG69MbeXaHF6sXqFh3sDGwOAfTerQ8Dd0bNWe.jpg",
+        alt: "1971 bungalow deep energy retrofit example",
+        caption: "Sample 1-image layout (1971 bungalow retrofit)",
+      },
+    ],
     options: toOptions([
       "Under 2 years",
       "2–5 years",
@@ -113,6 +120,28 @@ export const assessmentQuestions: QuestionConfig[] = [
     prompt: "Is there a possibility you may need to relocate?",
     type: "single_choice",
     required: true,
+    examples: [
+      {
+        src: "https://portal.retrofitcanada.com/storage/caseStudy/63/images/BWR0CM65x8ceCgg2lobsofKLdNdI786XbCEJQup7.jpg",
+        alt: "1890s brick house retrofit",
+        caption: "1890s Brick House",
+      },
+      {
+        src: "https://portal.retrofitcanada.com/storage/caseStudy/54/images/Jw8nDnJCrmn4al26ouprBVmZLZPIh8DmHVIJSLK2.jpg",
+        alt: "1959 bungalow net-zero ready retrofit",
+        caption: "1959 Bungalow",
+      },
+      {
+        src: "https://portal.retrofitcanada.com/storage/caseStudy/50/images/HeYLR4MGvf8aA5vHxBKpT0sUjRYKEtxsXF9LHwbC.jpg",
+        alt: "1969 split-level retrofit",
+        caption: "1969 Split-Level",
+      },
+      {
+        src: "https://portal.retrofitcanada.com/storage/caseStudy/73/images/0emHFCRaOjP3tWGIq22owMH4rUiijvmPWAdenH8c.jpg",
+        alt: "1975 Calgary NE bungalow",
+        caption: "1975 Bungalow",
+      },
+    ],
     options: toOptions([
       "No, unlikely",
       "Possibly",
@@ -127,6 +156,23 @@ export const assessmentQuestions: QuestionConfig[] = [
     prompt: "Are you considering selling this property?",
     type: "single_choice",
     required: true,
+    examples: [
+      {
+        src: "https://portal.retrofitcanada.com/storage/caseStudy/1/images/file_6759b796f0e8f.jpeg",
+        alt: "1985 Calgary home net-zero retrofit",
+        caption: "1985 Two-Storey",
+      },
+      {
+        src: "https://portal.retrofitcanada.com/storage/caseStudy/6/images/file_6759b7a1810d6.jpeg",
+        alt: "Aunger Residence retrofit",
+        caption: "1979 Residence",
+      },
+      {
+        src: "https://portal.retrofitcanada.com/storage/caseStudy/13/images/file_6759b7ab90b8c.jpeg",
+        alt: "Brookside deep retrofit",
+        caption: "1969 Deep Retrofit",
+      },
+    ],
     options: toOptions([
       "Yes, within 2 years",
       "Yes, within 5 years",
@@ -141,6 +187,18 @@ export const assessmentQuestions: QuestionConfig[] = [
     prompt: "What is the current condition of your home?",
     type: "single_choice",
     required: true,
+    examples: [
+      {
+        src: "https://portal.retrofitcanada.com/storage/caseStudy/56/images/PmFP4PO3v2cJOoJ9Jk7Tw4wpVoINp8X6K2USfMub.jpg",
+        alt: "Calgary staged retrofit home",
+        caption: "Staged Envelope Upgrade",
+      },
+      {
+        src: "https://portal.retrofitcanada.com/storage/caseStudy/48/images/0miwgjahEn3Gpv336vZ7BG3Uv1P2JTHbrMUsdG20.jpg",
+        alt: "Charon rowhouse retrofit",
+        caption: "1895 Townhome Retrofit",
+      },
+    ],
     options: toOptions([
       "Good condition",
       "Minor repairs needed",
