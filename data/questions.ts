@@ -1,4 +1,81 @@
-import type { QuestionConfig, QuestionOption } from "@/types";
+import type {
+  AnswerValue,
+  QuestionConfig,
+  QuestionOption,
+  QuestionnaireAnswers,
+} from "@/types";
+
+export function isQuestionVisible(
+  question: QuestionConfig,
+  answers: QuestionnaireAnswers
+): boolean {
+  if (!question.showIf) return true;
+
+  const raw = answers[question.showIf.questionId];
+  const depValue = Array.isArray(raw) ? raw.join(",") : (raw ?? "");
+
+  if (question.showIf.equals !== undefined) {
+    return depValue === question.showIf.equals;
+  }
+  if (question.showIf.notEquals !== undefined) {
+    return depValue !== question.showIf.notEquals;
+  }
+  if (question.showIf.notIn !== undefined) {
+    return !question.showIf.notIn.includes(depValue);
+  }
+  return true;
+}
+
+export function getVisibleQuestions(
+  questions: QuestionConfig[],
+  answers: QuestionnaireAnswers
+): QuestionConfig[] {
+  return questions.filter((question) => isQuestionVisible(question, answers));
+}
+
+const CANADIAN_POSTAL_CODE_REGEX = /^[A-Z]\d[A-Z]\s?\d[A-Z]\d$/;
+
+export function validateQuestion(
+  question: QuestionConfig,
+  value: AnswerValue | undefined
+): string | null {
+  const isEmptyArray = Array.isArray(value) && value.length === 0;
+  const textValue = typeof value === "string" ? value.trim() : "";
+  const isEmpty = value === undefined || isEmptyArray || textValue === "";
+
+  if (isEmpty) {
+    if (!question.required) return null;
+
+    if (question.type === "single_choice") {
+      return "Please select an option before continuing.";
+    }
+    if (question.type === "multi_choice") {
+      return "Please select at least one option before continuing.";
+    }
+    return "Please enter an answer before continuing.";
+  }
+
+  if (question.id === "postalCode") {
+    if (!CANADIAN_POSTAL_CODE_REGEX.test(textValue.toUpperCase())) {
+      return "Please enter a valid Canadian postal code (e.g., T2N 1N4).";
+    }
+  }
+
+  if (question.type === "number") {
+    const num = Number(textValue);
+    if (Number.isNaN(num)) {
+      return "Please enter a valid number.";
+    }
+    if (question.min !== undefined && num < question.min) {
+      return `Please enter a value of ${question.min} or greater.`;
+    }
+    if (question.max !== undefined && num > question.max) {
+      return `Please enter a value of ${question.max} or less.`;
+    }
+  }
+
+  return null;
+}
 
 function toOptions(items: readonly string[]): QuestionOption[] {
   return items.map((item) => ({ value: item, label: item }));
