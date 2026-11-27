@@ -1,26 +1,29 @@
-import {
-  getAllUnifiedCaseStudies,
-  type RawPortalCaseStudy,
-} from "@/lib/case-studies";
+import { getCaseStudyRows } from "@/lib/case-studies";
+import type { CaseStudyRow } from "@/lib/case-study-types";
 import type {
   MatchedCaseStudySummary,
   MockCaseStudyRecord,
   QuestionnaireAnswers,
 } from "@/types";
 
+/**
+ * Case studies for the advisor. They come from Supabase (filled monthly from Retrofit Canada's
+ * API by lib/retrofit-canada/sync.ts) and are kept in this server's memory for an hour, so a
+ * busy hour costs one database read.
+ */
+
 interface CacheState {
   records: MockCaseStudyRecord[];
   lastSyncedAt: string;
   expiresAt: number;
   upstreamPings: number;
-  etag?: string;
   pendingSync: Promise<CacheState> | null;
 }
 
-const DEFAULT_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour cache cooldown
+const DEFAULT_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 const globalForCache = globalThis as typeof globalThis & {
-  __rcMockApiCache?: CacheState;
+  __rcCaseStudyCache?: CacheState;
 };
 
 function getCacheTtlMs(): number {
@@ -71,54 +74,39 @@ export function inferProvinceFromPostalCode(postalCode?: string): string {
   }
 }
 
-function normalizePortalRecords(): MockCaseStudyRecord[] {
-  return getAllUnifiedCaseStudies().map((item) => {
-    const details = item.fullDetails;
-    const metrics = item.metrics;
-    const hasMetrics =
-      metrics.beforeGj !== undefined ||
-      metrics.afterGj !== undefined ||
-      metrics.energyReductionPercent !== undefined;
-
-    const lessonsSection = details?.sections.find((s) =>
-      s.heading.toLowerCase().includes("lesson")
-    );
-
-    return {
-      id: `rc-${item.id}`,
-      externalId: item.id,
-      title: item.title,
-      slug: item.slug,
-      link: item.internalLink,
-      imageUrl: item.imageUrl,
-      created: item.created,
-      yearBuilt: item.yearBuilt,
-      province: item.province,
-      city: metrics.location,
-      houseType: item.houseType,
-      structureType: item.structureType,
-      climateZone: item.climateZone,
-      retrofitPhasing: item.retrofitPhasing,
-      retrofitType: item.retrofitType,
-      performanceLevel: item.performanceLevel,
-      team: item.teamMembers.join("|"),
-      beforeGj: metrics.beforeGj,
-      afterGj: metrics.afterGj,
-      energyReductionPercent: metrics.energyReductionPercent,
-      summary: details?.intro || undefined,
-      lessonsLearned: lessonsSection
-        ? [...lessonsSection.paragraphs, ...lessonsSection.bullets]
-        : undefined,
-      hasDetailedMetrics: hasMetrics,
-      source: "retrofit_canada_mock_api",
-    };
-  });
+function toRecord(row: CaseStudyRow): MockCaseStudyRecord {
+  const hasMetrics = row.before_gj !== null || row.after_gj !== null || row.energy_savings_pct !== null;
+  return {
+    id: `rc-${row.id}`,
+    externalId: row.id,
+    title: row.name,
+    slug: row.slug,
+    link: `/case-studies/${row.slug}`,
+    imageUrl: row.image_url ?? "",
+    created: row.publish_date ?? "",
+    yearBuilt: row.year_built,
+    province: row.province ?? "",
+    city: [row.city, row.province].filter(Boolean).join(", ") || undefined,
+    houseType: row.house_type ?? "Not specified",
+    structureType: row.structure_type ?? "Not specified",
+    climateZone: row.climate_zone ?? "Not specified",
+    retrofitPhasing: row.retrofit_phasing ?? "Not specified",
+    retrofitType: row.retrofit_type ?? "Not specified",
+    performanceLevel: row.performance_level ?? "Not specified",
+    team: (row.team ?? []).map((m) => (m.role ? `${m.name} (${m.role})` : m.name)).join("|"),
+    beforeGj: row.before_gj ?? undefined,
+    afterGj: row.after_gj ?? undefined,
+    energyReductionPercent: row.energy_savings_pct ?? undefined,
+    summary: row.intro ?? undefined,
+    lessonsLearned: row.lessons_learned ? row.lessons_learned.split("\n").filter(Boolean) : undefined,
+    hasDetailedMetrics: hasMetrics,
+    source: "retrofit_canada_api",
+  };
 }
 
 /**
- * Fetches case studies from the configured external Retrofit Canada API if enabled,
- * or falls back to the local mock Retrofit Canada dataset.
- * Uses a single-flight cache + TTL cooldown to strictly limit upstream API pings.
+ * Returns the published case studies, from memory when loaded in the last hour.
+ * If Supabase can't be reached, keeps serving the last list it loaded (or an empty list).
  */
 export async function getCachedCaseStudies(options?: {
   forceRefresh?: boolean;
@@ -129,14 +117,9 @@ export async function getCachedCaseStudies(options?: {
   upstreamPings: number;
 }> {
   const now = Date.now();
-  const existing = globalForCache.__rcMockApiCache;
+  const existing = globalForCache.__rcCaseStudyCache;
 
-  if (
-    existing &&
-    !options?.forceRefresh &&
-    now < existing.expiresAt &&
-    existing.records.length > 0
-  ) {
+  if (existing && !options?.forceRefresh && now < existing.expiresAt && existing.records.length > 0) {
     return {
       records: existing.records,
       cached: true,
@@ -145,7 +128,7 @@ export async function getCachedCaseStudies(options?: {
     };
   }
 
-  // Single-flight lock so concurrent calls do not double-ping upstream
+  // Single-flight: concurrent requests share one database read.
   if (existing?.pendingSync) {
     const settled = await existing.pendingSync;
     return {
@@ -156,96 +139,41 @@ export async function getCachedCaseStudies(options?: {
     };
   }
 
-  const syncPromise = (async (): Promise<CacheState> => {
-    const previousPings = existing?.upstreamPings ?? 0;
-    const ttl = getCacheTtlMs();
-    const apiUrl = process.env.RETROFIT_CANADA_API_URL?.trim();
-    const apiKey = process.env.RETROFIT_CANADA_API_KEY?.trim();
-
-    let records: MockCaseStudyRecord[] | null = null;
-    let etag = existing?.etag;
-
-    // Optional live upstream hook when Retrofit Canada provides credentials later
-    if (apiUrl && apiKey) {
-      try {
-        const headers: Record<string, string> = {
-          Accept: "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        };
-        if (etag) {
-          headers["If-None-Match"] = etag;
-        }
-
-        const res = await fetch(apiUrl, {
-          headers,
-          signal: AbortSignal.timeout(8000),
-          cache: "no-store",
-        });
-
-        if (res.status === 304 && existing?.records.length) {
-          records = existing.records;
-        } else if (res.ok) {
-          const payload = (await res.json()) as RawPortalCaseStudy[];
-          if (Array.isArray(payload) && payload.length > 0) {
-            etag = res.headers.get("etag") ?? etag;
-            records = payload.map((item) => ({
-              id: `api-${item.id}`,
-              externalId: item.id,
-              title: item.title ?? "Untitled Case Study",
-              slug: item.link?.replace(/^\/case-studies\//, "") || `rc-${item.id}`,
-              link: item.link || "#",
-              imageUrl: item.image ?? "",
-              created: item.created ?? "",
-              yearBuilt: typeof item.yearBuilt === "number" ? item.yearBuilt : null,
-              province: item.province?.toUpperCase() || "AB",
-              houseType: item.houseType || "Single-Family 2+ Stories",
-              structureType: item.structureType || "Wood-Framed",
-              climateZone: item.climateZone || "",
-              retrofitPhasing: item.retrofitPhasing || "No",
-              retrofitType: item.retrofitType || "Envelope and Mechanical",
-              performanceLevel: item.performanceLevel || "Other",
-              team: item.team || "",
-              hasDetailedMetrics: false,
-              source: "retrofit_canada_mock_api",
-            }));
-          }
-        }
-      } catch {
-        // Fall back safely to cached or mock records if upstream is unreachable
-        records = existing?.records.length ? existing.records : null;
-      }
+  const loadPromise = (async (): Promise<CacheState> => {
+    const previousLoads = existing?.upstreamPings ?? 0;
+    let records: MockCaseStudyRecord[];
+    let ttl = getCacheTtlMs();
+    try {
+      records = (await getCaseStudyRows()).map(toRecord);
+    } catch (err) {
+      console.error("[case-studies] Supabase read failed; using the last loaded list.", err);
+      records = existing?.records ?? [];
+      ttl = 60 * 1000; // try again in a minute
     }
-
-    if (!records) {
-      records = normalizePortalRecords();
-    }
-
     const nextState: CacheState = {
       records,
       lastSyncedAt: new Date().toISOString(),
       expiresAt: Date.now() + ttl,
-      upstreamPings: previousPings + 1,
-      etag,
+      upstreamPings: previousLoads + 1,
       pendingSync: null,
     };
-
-    globalForCache.__rcMockApiCache = nextState;
+    globalForCache.__rcCaseStudyCache = nextState;
     return nextState;
   })();
 
   if (existing) {
-    existing.pendingSync = syncPromise;
+    existing.pendingSync = loadPromise;
   } else {
-    globalForCache.__rcMockApiCache = {
+    globalForCache.__rcCaseStudyCache = {
       records: [],
       lastSyncedAt: new Date().toISOString(),
       expiresAt: 0,
       upstreamPings: 0,
-      pendingSync: syncPromise,
+      pendingSync: loadPromise,
     };
   }
 
-  const finalState = await syncPromise;
+  const finalState = await loadPromise;
   return {
     records: finalState.records,
     cached: false,
@@ -305,7 +233,7 @@ export async function findMatchingCaseStudies(
 ): Promise<{
   matches: MatchedCaseStudySummary[];
   cacheMeta: {
-    provider: "mock_retrofit_canada_api";
+    provider: "retrofit_canada_supabase";
     cached: boolean;
     lastSyncedAt: string;
     upstreamPings: number;
@@ -386,7 +314,7 @@ export async function findMatchingCaseStudies(
   return {
     matches,
     cacheMeta: {
-      provider: "mock_retrofit_canada_api",
+      provider: "retrofit_canada_supabase",
       cached,
       lastSyncedAt,
       upstreamPings,

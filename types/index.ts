@@ -156,6 +156,7 @@ export interface QuestionConfig {
 }
 
 export type DataSourceTag =
+  | "retrofit_canada_api"
   | "retrofit_canada_mock_api"
   | "sample_data"
   | "ai_estimate";
@@ -270,7 +271,8 @@ export interface RetrofitAssessmentResult {
   rebates: RebateProgramMatch[];
   matchedCaseStudies: MatchedCaseStudySummary[];
   cacheMeta: {
-    provider: "mock_retrofit_canada_api";
+    /** Where matched case studies came from: Supabase, filled monthly from Retrofit Canada's API. */
+    provider: "retrofit_canada_supabase";
     cached: boolean;
     lastSyncedAt: string;
     upstreamPings: number;

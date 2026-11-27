@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Pull matched case studies via the cached mock Retrofit Canada API (limits upstream pings)
+  // Match against Retrofit Canada's case studies (read from Supabase, cached in memory for an hour)
   const { matches, cacheMeta } = await findMatchingCaseStudies(
     validation.data.answers,
     4
