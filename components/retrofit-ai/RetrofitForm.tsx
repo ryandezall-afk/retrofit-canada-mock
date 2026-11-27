@@ -6,9 +6,15 @@ import {
   getVisibleQuestions,
   validateQuestion,
 } from "@/data/questions";
-import type { AnswerValue, QuestionConfig, QuestionnaireAnswers } from "@/types";
+import type {
+  AnswerValue,
+  QuestionConfig,
+  QuestionnaireAnswers,
+  RetrofitAssessmentResult,
+} from "@/types";
 import QuestionCard from "./QuestionCard";
 import AssessmentReview from "./AssessmentReview";
+import AssessmentResults from "./AssessmentResults";
 
 const DRAFT_STORAGE_KEY = "retrofit_ai_session_draft";
 const DEFAULT_ANSWERS: QuestionnaireAnswers = { floorAreaUnit: "sqft" };
@@ -17,6 +23,7 @@ interface DraftState {
   answers: QuestionnaireAnswers;
   currentIndex: number;
   isComplete: boolean;
+  result: RetrofitAssessmentResult | null;
 }
 
 const draftListeners = new Set<() => void>();
@@ -101,6 +108,7 @@ function parseDraft(
       answers: { ...DEFAULT_ANSWERS },
       currentIndex: 0,
       isComplete: false,
+      result: null,
     };
   }
 
@@ -118,12 +126,14 @@ function parseDraft(
       answers,
       currentIndex,
       isComplete: Boolean(parsed.isComplete),
+      result: parsed.result && typeof parsed.result === "object" ? parsed.result : null,
     };
   } catch {
     return {
       answers: { ...DEFAULT_ANSWERS },
       currentIndex: 0,
       isComplete: false,
+      result: null,
     };
   }
 }
@@ -141,9 +151,10 @@ export default function RetrofitForm({
     getServerDraftSnapshot
   );
   const draft = parseDraft(rawDraft, questions);
-  const { answers, currentIndex, isComplete } = draft;
+  const { answers, currentIndex, isComplete, result } = draft;
 
   const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const formTopRef = useRef<HTMLDivElement>(null);
 
   const visibleQuestions = getVisibleQuestions(questions, answers);
@@ -184,7 +195,12 @@ export default function RetrofitForm({
       nextAnswers.secondPriority = "";
     }
 
-    writeDraft({ answers: nextAnswers, currentIndex: safeIndex, isComplete });
+    writeDraft({
+      answers: nextAnswers,
+      currentIndex: safeIndex,
+      isComplete,
+      result: null,
+    });
   };
 
   const nextQuestion = () => {
@@ -201,7 +217,12 @@ export default function RetrofitForm({
 
     setError(null);
     if (safeIndex < totalQuestions) {
-      writeDraft({ answers, currentIndex: safeIndex + 1, isComplete: false });
+      writeDraft({
+        answers,
+        currentIndex: safeIndex + 1,
+        isComplete: false,
+        result,
+      });
       scrollToFormTop();
     }
   };
@@ -213,7 +234,12 @@ export default function RetrofitForm({
       safeIndex < totalQuestions
     ) {
       setError(null);
-      writeDraft({ answers, currentIndex: safeIndex + 1, isComplete: false });
+      writeDraft({
+        answers,
+        currentIndex: safeIndex + 1,
+        isComplete: false,
+        result,
+      });
       scrollToFormTop();
     }
   };
@@ -221,7 +247,12 @@ export default function RetrofitForm({
   const previousQuestion = () => {
     if (safeIndex > 0) {
       setError(null);
-      writeDraft({ answers, currentIndex: safeIndex - 1, isComplete: false });
+      writeDraft({
+        answers,
+        currentIndex: safeIndex - 1,
+        isComplete: false,
+        result,
+      });
       scrollToFormTop();
     }
   };
@@ -230,12 +261,17 @@ export default function RetrofitForm({
     const index = visibleQuestions.findIndex((q) => q.id === questionId);
     if (index !== -1) {
       setError(null);
-      writeDraft({ answers, currentIndex: index, isComplete: false });
+      writeDraft({
+        answers,
+        currentIndex: index,
+        isComplete: false,
+        result,
+      });
       scrollToFormTop();
     }
   };
 
-  const completeAssessment = () => {
+  const completeAssessment = async () => {
     const firstInvalidIndex = visibleQuestions.findIndex(
       (q) => validateQuestion(q, answers[q.id]) !== null
     );
@@ -246,17 +282,71 @@ export default function RetrofitForm({
         answers,
         currentIndex: firstInvalidIndex,
         isComplete: false,
+        result: null,
       });
       setError(validateQuestion(invalidQuestion, answers[invalidQuestion.id]));
       scrollToFormTop();
       return;
     }
 
-    // Prototype only. No backend or AI request is made.
     setError(null);
-    writeDraft({ answers, currentIndex: safeIndex, isComplete: true });
-    scrollToFormTop();
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch("/api/advisor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers }),
+      });
+
+      const data = (await response.json()) as
+        | RetrofitAssessmentResult
+        | { error?: string };
+
+      if (!response.ok) {
+        const message =
+          "error" in data && data.error
+            ? data.error
+            : "Unable to complete assessment. Please try again.";
+        setError(message);
+        return;
+      }
+
+      writeDraft({
+        answers,
+        currentIndex: safeIndex,
+        isComplete: true,
+        result: data as RetrofitAssessmentResult,
+      });
+      scrollToFormTop();
+    } catch {
+      setError(
+        "Network error while generating your retrofit assessment. Please try again."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+
+  if (isComplete && result) {
+    return (
+      <div ref={formTopRef} className="scroll-mt-28">
+        <AssessmentResults
+          result={result}
+          onReviewAnswers={() => {
+            writeDraft({
+              answers,
+              currentIndex: totalQuestions,
+              isComplete: false,
+              result,
+            });
+            scrollToFormTop();
+          }}
+          onStartOver={resetAssessment}
+        />
+      </div>
+    );
+  }
 
   if (isComplete) {
     return (
@@ -264,41 +354,13 @@ export default function RetrofitForm({
         ref={formTopRef}
         className="mx-auto mt-8 w-full max-w-[440px] scroll-mt-28 rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-md sm:p-8"
       >
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-3xl text-green-700">
-          ✓
-        </div>
-
-        <h2 className="mt-6 font-saira text-2xl font-bold text-rc-navy sm:text-3xl">
-          Assessment Complete!
+        <h2 className="font-saira text-2xl font-bold text-rc-navy">
+          Assessment Complete
         </h2>
-
-        <p className="mx-auto mt-3 text-sm leading-relaxed text-slate-600 sm:text-base">
-          You&apos;ve completed the Retrofit Canada homeowner assessment
-          prototype.
+        <p className="mt-3 text-sm text-slate-600">
+          Your results session expired. Review your answers and submit again to
+          generate your retrofit plan.
         </p>
-
-        <div className="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-5 text-left">
-          <h3 className="font-semibold text-rc-navy">
-            What happens in the completed application?
-          </h3>
-
-          <p className="mt-2.5 text-sm leading-relaxed text-slate-600">
-            The AI Retrofit Advisor will analyze your home&apos;s
-            characteristics, your future plans, and your renovation priorities
-            to identify potentially suitable upgrades.
-          </p>
-
-          <p className="mt-2.5 text-sm leading-relaxed text-slate-600">
-            Recommendations will eventually include estimated costs, energy
-            savings, payback periods, and applicable funding opportunities where
-            available.
-          </p>
-
-          <p className="mt-2.5 text-sm font-medium text-slate-600">
-            Prototype only — no assessment has been submitted or analyzed by AI.
-          </p>
-        </div>
-
         <div className="mt-6 flex flex-col gap-3">
           <button
             type="button"
@@ -307,6 +369,7 @@ export default function RetrofitForm({
                 answers,
                 currentIndex: totalQuestions,
                 isComplete: false,
+                result: null,
               });
               scrollToFormTop();
             }}
@@ -314,7 +377,6 @@ export default function RetrofitForm({
           >
             Review My Answers
           </button>
-
           <button
             type="button"
             onClick={resetAssessment}
@@ -409,11 +471,20 @@ export default function RetrofitForm({
       </div>
 
       {/* Navigation */}
+      {isReviewStep && error && (
+        <div
+          role="alert"
+          className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-rc-red"
+        >
+          {error}
+        </div>
+      )}
+
       <div className="mt-8 flex items-center gap-3 border-t border-slate-100 pt-5">
         <button
           type="button"
           onClick={previousQuestion}
-          disabled={safeIndex === 0}
+          disabled={safeIndex === 0 || isSubmitting}
           className="flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm font-semibold text-rc-navy transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Back
@@ -423,9 +494,10 @@ export default function RetrofitForm({
           <button
             type="button"
             onClick={completeAssessment}
-            className="flex-[2] rounded-xl bg-rc-red px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-700"
+            disabled={isSubmitting}
+            className="flex-[2] rounded-xl bg-rc-red px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Complete Assessment
+            {isSubmitting ? "Analyzing Home..." : "Complete Assessment"}
           </button>
         ) : (
           <button

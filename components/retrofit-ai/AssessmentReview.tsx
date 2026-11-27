@@ -123,13 +123,13 @@ export default function AssessmentReview({
       ))}
 
       <div className="rounded-lg border border-slate-200 bg-slate-50 p-5">
-        <h4 className="font-semibold text-rc-navy">Prototype Assessment</h4>
+        <h4 className="font-semibold text-rc-navy">Ready to Analyze</h4>
 
         <p className="mt-2 text-sm text-slate-600">
-          This is a demonstration of the homeowner questionnaire. No AI
-          analysis, rebate eligibility checks, or energy calculations are
-          performed yet. Your answers are currently held in browser memory and
-          are not submitted to a server.
+          Submitting sends your home profile to our assessment API, matches
+          similar projects from the cached Mock Retrofit Canada database, and
+          generates prioritized recommendations via Gemini AI (with automatic
+          mock fallback if no Gemini API key is configured).
         </p>
       </div>
     </div>

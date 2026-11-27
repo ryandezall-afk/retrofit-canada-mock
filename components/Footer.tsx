@@ -15,7 +15,7 @@ export function Footer() {
   };
 
   return (
-    <footer className="w-full">
+    <footer className="w-full print:hidden">
       {/* Upper Footer (#2e3249) */}
       <div className="bg-[#2e3249] text-white pt-12 pb-10 px-6">
         <div className="max-w-4xl mx-auto text-center space-y-6">
