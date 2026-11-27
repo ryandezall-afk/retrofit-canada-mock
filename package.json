@@ -8,9 +8,11 @@
     "start": "next start",
     "lint": "eslint app/ components/",
     "sync:case-studies": "node --env-file=.env.local scripts/sync-case-studies.mjs",
+    "sync:rebates": "node --env-file=.env.local scripts/sync-rebates.mjs",
     "test:db": "node tests/db/case-studies-schema.test.mjs",
     "test:sync": "tsx --require ./tests/helpers/stub-server-only.cjs tests/case-studies-sync.test.mts",
-    "test": "npm run test:db && npm run test:sync"
+    "test:rebates": "tsx --require ./tests/helpers/stub-server-only.cjs tests/rebates-sync.test.mts",
+    "test": "npm run test:db && npm run test:sync && npm run test:rebates"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.2",

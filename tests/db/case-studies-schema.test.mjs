@@ -84,8 +84,22 @@ async function runChecks(autoExpose) {
   check("new case studies default to published, empty team, timestamps set",
     row?.is_active === true && JSON.stringify(row?.team) === "[]" && row?.has_time === true);
 
-  const rls = await db.query(`select relname, relrowsecurity from pg_class where relname in ('case_studies', 'sync_runs') order by relname`);
-  check("RLS is on for both tables", rls.rows.every((r) => r.relrowsecurity) && rls.rows.length === 2);
+  const rls = await db.query(`select relname, relrowsecurity from pg_class where relname in ('case_studies', 'sync_runs', 'rebate_programs') order by relname`);
+  check("RLS is on for all 3 tables", rls.rows.every((r) => r.relrowsecurity) && rls.rows.length === 3);
+
+  // Rebate programs RLS & constraints ----------------------------------------------------------
+  await db.exec(`
+    insert into public.rebate_programs (slug, name, level, province, summary, estimated_value, url, content_hash, is_active)
+    values
+      ('cghl', 'Canada Greener Homes Loan', 'Federal', 'ALL', '0% loan', 'Up to $40,000', 'https://natural-resources.canada.ca/loan', 'h1', true),
+      ('old-grant', 'Closed Grant', 'Federal', 'ALL', 'Closed', '$0', 'https://natural-resources.canada.ca/old', 'h2', false);
+  `);
+  const visibleRebates = await allowed(db, "anon", "anon can read rebate_programs", "select slug from public.rebate_programs");
+  check("anon sees only active rebate programs", visibleRebates?.rows.map((r) => r.slug).join() === "cghl");
+  await denied(db, "anon", "anon cannot insert rebate_programs", `insert into public.rebate_programs (slug, name, level, province, summary, estimated_value, url, content_hash) values ('x', 'X', 'Federal', 'ALL', 's', 'v', 'https://canada.ca', 'h')`);
+  await denied(db, "service_role", "rebate url must be https", `insert into public.rebate_programs (slug, name, level, province, summary, estimated_value, url, content_hash) values ('http-bad', 'Bad', 'Federal', 'ALL', 's', 'v', 'http://canada.ca', 'h')`);
+  await denied(db, "service_role", "sync_type must be case_studies or rebates", `insert into public.sync_runs (sync_type) values ('other')`);
+  await allowed(db, "service_role", "service_role can log a rebates sync_run", `insert into public.sync_runs (sync_type, status) values ('rebates', 'success')`);
   await db.close();
 }
 

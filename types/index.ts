@@ -245,6 +245,9 @@ export interface RebateProgramMatch {
   estimatedValue: string;
   eligibilityNotes: string;
   url: string;
+  status?: "active" | "waitlist" | "closed";
+  lastVerifiedAt?: string;
+  source?: "supabase" | "fallback";
 }
 
 export interface RetrofitAssessmentResult {

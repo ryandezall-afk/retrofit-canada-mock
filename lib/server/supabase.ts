@@ -14,12 +14,15 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 /** Tag on cached case-study reads; the sync calls revalidateTag(CASE_STUDIES_CACHE_TAG). */
 export const CASE_STUDIES_CACHE_TAG = "case-studies";
+/** Tag on cached rebate reads; the monthly rebate sync calls revalidateTag(REBATES_CACHE_TAG). */
+export const REBATES_CACHE_TAG = "rebates";
 /** Cached reads refresh at least daily even without a sync. */
 export const CASE_STUDIES_REVALIDATE_SECONDS = 24 * 60 * 60;
 
 const authOptions = { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false };
 
 let reader: SupabaseClient | null | undefined;
+let rebateReader: SupabaseClient | null | undefined;
 let admin: SupabaseClient | null | undefined;
 
 export function getSupabaseReader(): SupabaseClient | null {
@@ -43,6 +46,26 @@ export function getSupabaseReader(): SupabaseClient | null {
   return reader;
 }
 
+export function getSupabaseRebatesReader(): SupabaseClient | null {
+  if (rebateReader !== undefined) return rebateReader;
+  const url = process.env.SUPABASE_URL?.trim();
+  const key = process.env.SUPABASE_PUBLISHABLE_KEY?.trim();
+  rebateReader =
+    url && key
+      ? createClient(url, key, {
+          auth: authOptions,
+          global: {
+            fetch: (input, init) =>
+              fetch(input, {
+                ...init,
+                next: { revalidate: CASE_STUDIES_REVALIDATE_SECONDS, tags: [REBATES_CACHE_TAG] },
+              } as RequestInit),
+          },
+        })
+      : null;
+  return rebateReader;
+}
+
 export function getSupabaseAdmin(): SupabaseClient | null {
   if (typeof window !== "undefined") throw new Error("getSupabaseAdmin() must only run on the server");
   if (admin !== undefined) return admin;
@@ -62,5 +85,6 @@ export function getSupabaseAdmin(): SupabaseClient | null {
 /** Tests only: forget the cached clients after changing environment variables. */
 export function resetSupabaseClientsForTests(): void {
   reader = undefined;
+  rebateReader = undefined;
   admin = undefined;
 }

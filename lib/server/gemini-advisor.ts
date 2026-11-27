@@ -1,7 +1,7 @@
+import { getMatchingRebatesAsync } from "@/lib/rebates";
 import {
   ASSESSMENT_DISCLAIMER,
   buildMockAssessmentResult,
-  getMatchingRebates,
 } from "@/lib/server/mock-assessment";
 import type { ValidatedAssessmentInput } from "@/lib/validation/assessment";
 import type {
@@ -117,13 +117,22 @@ export async function generateRetrofitAssessment(params: {
         ? "USE_MOCK_ASSESSMENT=true is enabled."
         : "GEMINI_API_KEY is not configured; using mock retrofit assessment fallback.";
 
-    return buildMockAssessmentResult({
+    return await buildMockAssessmentResult({
       input,
       matchedCaseStudies,
       cacheMeta,
       fallbackReason: reason,
     });
   }
+
+  const financingAnswer =
+    typeof input.answers.financing === "string"
+      ? input.answers.financing
+      : undefined;
+  const availableRebates = await getMatchingRebatesAsync(
+    input.province,
+    financingAnswer
+  );
 
   const promptContext = {
     homeownerAnswers: input.answers,
@@ -151,12 +160,7 @@ export async function generateRetrofitAssessment(params: {
       annualUtilitySavings: cs.annualUtilitySavings ?? null,
       summary: cs.summary ?? null,
     })),
-    availableRebates: getMatchingRebates(
-      input.province,
-      typeof input.answers.financing === "string"
-        ? input.answers.financing
-        : undefined
-    ),
+    availableRebates,
   };
 
   const systemInstruction = [
@@ -237,11 +241,6 @@ ${JSON.stringify(promptContext, null, 2)}`;
       throw new Error("Gemini response contained no valid recommendations.");
     }
 
-    const financingAnswer =
-      typeof input.answers.financing === "string"
-        ? input.answers.financing
-        : undefined;
-
     return {
       assessmentId: `gem-${Date.now()}`,
       createdAt: new Date().toISOString(),
@@ -274,7 +273,7 @@ ${JSON.stringify(promptContext, null, 2)}`;
         Math.round(Number(parsed.estimatedAnnualSavingsMax) || 950)
       ),
       recommendations,
-      rebates: getMatchingRebates(input.province, financingAnswer),
+      rebates: availableRebates,
       matchedCaseStudies,
       cacheMeta,
       disclaimer: ASSESSMENT_DISCLAIMER,
@@ -283,7 +282,7 @@ ${JSON.stringify(promptContext, null, 2)}`;
     const message =
       error instanceof Error ? error.message : "Unknown Gemini API error";
 
-    return buildMockAssessmentResult({
+    return await buildMockAssessmentResult({
       input,
       matchedCaseStudies,
       cacheMeta,

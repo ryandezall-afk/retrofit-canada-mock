@@ -1,7 +1,7 @@
+import { getFallbackRebates, getMatchingRebatesAsync } from "@/lib/rebates";
 import type { ValidatedAssessmentInput } from "@/lib/validation/assessment";
 import type {
   MatchedCaseStudySummary,
-  RebateProgramMatch,
   RetrofitAssessmentResult,
   RetrofitUpgradeRecommendation,
 } from "@/types";
@@ -9,92 +9,7 @@ import type {
 export const ASSESSMENT_DISCLAIMER =
   "All costs, annual utility savings, payback periods, and energy reductions shown here are illustrative estimates for early planning only and do not replace an on-site EnerGuide evaluation by a registered Energy Advisor.";
 
-export function getMatchingRebates(
-  province: string,
-  financingAnswer?: string
-): RebateProgramMatch[] {
-  const rebates: RebateProgramMatch[] = [
-    {
-      id: "cghl",
-      name: "Canada Greener Homes Loan",
-      level: "Federal",
-      summary:
-        "Interest-free financing of $5,000 to $40,000 over 10 years for eligible deep energy retrofits.",
-      estimatedValue: "Up to $40,000 (0% APR loan)",
-      eligibilityNotes:
-        "Requires a pre- and post-retrofit EnerGuide home energy evaluation.",
-      url: "https://natural-resources.canada.ca/energy-efficiency/homes/canada-greener-homes-initiative/24831",
-    },
-  ];
-
-  if (province === "AB") {
-    rebates.push({
-      id: "ab-ceip",
-      name: "Clean Energy Improvement Program (CEIP Alberta)",
-      level: "Municipal",
-      summary:
-        "Low-interest financing repaid through your municipal property tax bill for eligible envelope, heat pump, and solar upgrades.",
-      estimatedValue: "Up to 100% project financing (municipality dependent)",
-      eligibilityNotes:
-        "Available in participating Alberta municipalities including Calgary and Edmonton.",
-      url: "https://ceip.abmunis.ca/",
-    });
-  } else if (province === "BC") {
-    rebates.push({
-      id: "bc-cleanbc",
-      name: "CleanBC Better Homes & Home Renovation Rebate",
-      level: "Provincial",
-      summary:
-        "Rebates for switching from fossil-fuel heating to cold-climate heat pumps, insulation, and window upgrades.",
-      estimatedValue: "$1,000 – $6,000+ (measure dependent)",
-      eligibilityNotes: "Income-qualified top-ups may increase rebate amounts.",
-      url: "https://www.betterhomesbc.ca/",
-    });
-  } else if (province === "ON") {
-    rebates.push({
-      id: "on-hrs",
-      name: "Ontario Home Renovation Savings Program",
-      level: "Provincial",
-      summary:
-        "Rebates for heat pumps, insulation, air sealing, windows/doors, and rooftop solar with battery storage.",
-      estimatedValue: "$600 – $7,500+ (measure dependent)",
-      eligibilityNotes:
-        "Available for eligible electrically or gas-heated homes in Ontario.",
-      url: "https://www.homerenovationsavings.ca/",
-    });
-  } else {
-    rebates.push({
-      id: "prov-efficiency",
-      name: `${province} Provincial / Utility Efficiency Rebates`,
-      level: "Provincial",
-      summary:
-        "Regional utility and provincial incentives for air sealing, attic insulation, and high-efficiency heat pumps.",
-      estimatedValue: "$500 – $5,000 (program dependent)",
-      eligibilityNotes:
-        "Confirm current program intake windows with your local energy utility or Energy Advisor.",
-      url: "https://retrofitcanada.com/the-retrofit-roadmap",
-    });
-  }
-
-  if (
-    financingAnswer === "Yes, I'm interested" ||
-    financingAnswer === "Maybe / Tell me more"
-  ) {
-    rebates.push({
-      id: "ohpa",
-      name: "Oil to Heat Pump Affordability (OHPA) Program",
-      level: "Federal",
-      summary:
-        "Upfront grants for eligible low-to-median income households switching away from oil heating.",
-      estimatedValue: "Up to $10,000 – $15,000 (if oil-heated & eligible)",
-      eligibilityNotes:
-        "Applies specifically to homes currently heated primarily with oil.",
-      url: "https://natural-resources.canada.ca/energy-efficiency/homes/canada-greener-homes-initiative/oil-heat-pump-affordability-program/24775",
-    });
-  }
-
-  return rebates;
-}
+export const getMatchingRebates = getFallbackRebates;
 
 function estimateBaselineAnnualCost(input: ValidatedAssessmentInput): number {
   const { answers } = input;
@@ -126,12 +41,12 @@ function estimateBaselineAnnualCost(input: ValidatedAssessmentInput): number {
   return Math.round(sqFt * 1.45);
 }
 
-export function buildMockAssessmentResult(params: {
+export async function buildMockAssessmentResult(params: {
   input: ValidatedAssessmentInput;
   matchedCaseStudies: MatchedCaseStudySummary[];
   cacheMeta: RetrofitAssessmentResult["cacheMeta"];
   fallbackReason?: string;
-}): RetrofitAssessmentResult {
+}): Promise<RetrofitAssessmentResult> {
   const { input, matchedCaseStudies, cacheMeta, fallbackReason } = params;
   const { answers, province } = input;
   const baselineCost = estimateBaselineAnnualCost(input);
@@ -331,7 +246,7 @@ export function buildMockAssessmentResult(params: {
     estimatedAnnualSavingsMin: Math.min(totalSavingsMin, Math.round(baselineCost * 0.55)),
     estimatedAnnualSavingsMax: Math.min(totalSavingsMax, Math.round(baselineCost * 0.72)),
     recommendations: finalRecs,
-    rebates: getMatchingRebates(province, financingAnswer),
+    rebates: await getMatchingRebatesAsync(province, financingAnswer),
     matchedCaseStudies,
     cacheMeta,
     disclaimer: ASSESSMENT_DISCLAIMER,

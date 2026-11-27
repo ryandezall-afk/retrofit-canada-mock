@@ -58,6 +58,7 @@ export async function syncCaseStudies(db: SupabaseClient, options: SyncOptions =
   const { data: lastRuns, error: lastRunsError } = await db
     .from("sync_runs")
     .select("id,status,started_at")
+    .eq("sync_type", "case_studies")
     .order("started_at", { ascending: false })
     .limit(20);
   if (lastRunsError) return { status: "failed", message: `Reading sync_runs failed: ${lastRunsError.message}` };
@@ -82,7 +83,12 @@ export async function syncCaseStudies(db: SupabaseClient, options: SyncOptions =
 
   const { data: run, error: runError } = await db
     .from("sync_runs")
-    .insert({ started_at: now.toISOString(), status: "running", trigger: options.trigger ?? "cron" })
+    .insert({
+      started_at: now.toISOString(),
+      status: "running",
+      trigger: options.trigger ?? "cron",
+      sync_type: "case_studies",
+    })
     .select("id")
     .single();
   if (runError || !run) return { status: "failed", message: `Creating sync run failed: ${runError?.message}` };

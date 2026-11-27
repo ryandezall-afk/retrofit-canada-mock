@@ -262,9 +262,22 @@ export default function AssessmentResults({
               className="flex flex-col justify-between rounded-xl border border-slate-200 p-4 print:break-inside-avoid"
             >
               <div>
-                <span className="inline-block rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-rc-navy">
-                  {rebate.level}
-                </span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="inline-block rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-rc-navy">
+                    {rebate.level}
+                  </span>
+                  {rebate.status === "waitlist" && (
+                    <span className="inline-block rounded bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                      Waitlist
+                    </span>
+                  )}
+                  {rebate.lastVerifiedAt && (
+                    <span className="text-[11px] text-slate-400">
+                      Verified{" "}
+                      {new Date(rebate.lastVerifiedAt).toLocaleDateString("en-CA")}
+                    </span>
+                  )}
+                </div>
                 <h4 className="mt-2 font-saira text-base font-bold text-rc-navy">
                   {rebate.name}
                 </h4>
