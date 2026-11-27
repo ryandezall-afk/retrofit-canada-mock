@@ -207,6 +207,39 @@ function estimateTargetYear(answers: QuestionnaireAnswers): number | null {
   }
 }
 
+const PROVINCE_NAMES: Record<string, string> = {
+  ALBERTA: "AB",
+  "BRITISH COLUMBIA": "BC",
+  ONTARIO: "ON",
+  QUEBEC: "QC",
+  "QUÉBEC": "QC",
+  "NOVA SCOTIA": "NS",
+  SASKATCHEWAN: "SK",
+  MANITOBA: "MB",
+  "NEW BRUNSWICK": "NB",
+  "PRINCE EDWARD ISLAND": "PE",
+  "NEWFOUNDLAND AND LABRADOR": "NL",
+  YUKON: "YT",
+  "NORTHWEST TERRITORIES": "NT",
+  NUNAVUT: "NU",
+};
+
+/** "SASKATCHEWAN" -> "SK"; two-letter codes pass through. */
+function normalizeProvince(value: string): string {
+  const upper = value.trim().toUpperCase();
+  return PROVINCE_NAMES[upper] ?? upper;
+}
+
+function isNonResidential(houseType: string): boolean {
+  const t = houseType.toLowerCase();
+  return (
+    t.includes("part 3") ||
+    t.includes("office") ||
+    t.includes("utility") ||
+    t.includes("commercial")
+  );
+}
+
 function matchesHouseType(
   recordHouseType: string,
   homeType?: string,
@@ -250,11 +283,16 @@ export async function findMatchingCaseStudies(
   const homeType = typeof answers.homeType === "string" ? answers.homeType : "";
   const storeys = typeof answers.storeys === "string" ? answers.storeys : "";
 
-  const scored = records.map((record) => {
+  // The library also holds offices, utilities and large "Part 3" buildings; never offer
+  // those as comparables for a house, unless nothing else is available.
+  const residential = records.filter((r) => !isNonResidential(r.houseType));
+  const pool = residential.length > 0 ? residential : records;
+
+  const scored = pool.map((record) => {
     let score = 0;
     const reasons: string[] = [];
 
-    if (record.province === targetProvince) {
+    if (normalizeProvince(record.province) === targetProvince) {
       score += 40;
       reasons.push(`Same province (${targetProvince})`);
     }
@@ -289,6 +327,7 @@ export async function findMatchingCaseStudies(
     .slice(0, limit)
     .map(({ record, score, reasons }) => ({
       id: record.id,
+      slug: record.slug,
       title: record.title,
       province: record.province,
       city: record.city,

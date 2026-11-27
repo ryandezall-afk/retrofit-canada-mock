@@ -194,6 +194,7 @@ export interface MockCaseStudyRecord {
 
 export interface MatchedCaseStudySummary {
   id: string;
+  slug?: string;
   title: string;
   province: string;
   city?: string;
@@ -234,6 +235,8 @@ export interface RetrofitUpgradeRecommendation {
   estimatedPaybackYears: string;
   energyReductionRange: string;
   eligibleRebates: string[];
+  /** Matched case studies Gemini says this step is based on (ids + titles). */
+  supportingCaseStudies?: { id: string; title: string }[];
   source: DataSourceTag;
 }
 
@@ -271,6 +274,8 @@ export interface RetrofitAssessmentResult {
   estimatedAnnualSavingsMin: number;
   estimatedAnnualSavingsMax: number;
   recommendations: RetrofitUpgradeRecommendation[];
+  /** Short, ordered to-do list for the homeowner (e.g. "Book an EnerGuide evaluation"). */
+  nextSteps?: string[];
   rebates: RebateProgramMatch[];
   matchedCaseStudies: MatchedCaseStudySummary[];
   cacheMeta: {

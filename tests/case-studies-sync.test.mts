@@ -186,7 +186,9 @@ check("a 'running' row older than 15 min is ignored", stale.status === "success"
 // --- 7. The advisor ----------------------------------------------------------------------------
 console.log("\n--- Advisor ---");
 const { matches, cacheMeta } = await findMatchingCaseStudies({ postalCode: "T5K 0A1", yearBuilt: "1970–1989" } as any, 4);
-check("advisor matches come from Supabase", matches.length === 3 && matches.every((m) => m.source === "retrofit_canada_api"), matches.map((m) => m.title));
+// 3 rows in Supabase, but the "Part 3" (large/non-residential) one is never offered as a comparable for a house
+check("advisor matches come from Supabase", matches.length === 2 && matches.every((m) => m.source === "retrofit_canada_api"), matches.map((m) => m.title));
+check("non-residential case studies are not matched to houses", matches.every((m) => m.houseType !== "Part 3"), matches.map((m) => m.houseType));
 check("best match is the Alberta 1971 home", matches[0]?.title === "Test bungalow goes net-zero", matches[0]);
 check("cache meta names the source", cacheMeta.provider === "retrofit_canada_supabase" && cacheMeta.totalRecordsAvailable === 3, cacheMeta);
 supabaseDown = true;
