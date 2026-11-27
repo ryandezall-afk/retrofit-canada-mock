@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     meta: {
-      provider: "mock_retrofit_canada_api",
+      provider: "retrofit_canada_supabase",
       cached,
       lastSyncedAt,
       upstreamPings,

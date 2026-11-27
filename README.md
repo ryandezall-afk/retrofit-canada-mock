@@ -24,7 +24,7 @@ capstone/
 │   ├── layout.tsx                     # Global Root Layout (Navbar & Footer wrapper)
 │   ├── page.tsx                       # Homepage (Hero, Roadmap preview, Featured Case Studies)
 │   ├── case-studies/
-│   │   ├── page.tsx                   # Case Study Library with multi-criteria filtering & search
+│   │   ├── page.tsx                   # Case Study Library (loads from Supabase; UI in components/CaseStudiesBrowser.tsx)
 │   │   └── [id]/
 │   │       └── page.tsx               # Dynamic individual case study breakdown with HOT2000 specs
 │   ├── the-retrofit-roadmap/
@@ -41,7 +41,15 @@ capstone/
 │   │   └── page.tsx                   # Contact form & API research access request
 │   ├── submit-project/
 │   │   └── page.tsx                   # Intake form for contractors, advisors, and owners
+│   ├── api/cron/sync-case-studies/
+│   │   └── route.ts                   # Monthly sync: Retrofit Canada API -> Supabase (called by Vercel Cron)
 │   └── globals.css                    # Tailwind CSS directives
+├── lib/
+│   ├── case-studies.ts                # Reads case studies from Supabase (cached, server only)
+│   ├── retrofit-canada/               # API client, mapper (API record -> page data), sync, dropdown options
+│   └── server/supabase.ts             # Supabase clients (publishable key = read, secret key = sync)
+├── supabase/migrations/               # SQL to create the case_studies and sync_runs tables
+├── tests/                             # npm test: database rules + full sync pipeline (no keys needed)
 ├── components/
 │   ├── Navbar.tsx                     # Top header matching Retrofit Canada navigation
 │   ├── Footer.tsx                     # Comprehensive footer with NRCan, SAIT, SSRIA & CEIP partners
@@ -108,6 +116,47 @@ capstone/
 9. **Contact & Submit Project (`/contact`, `/submit-project`)**:
    - General communication, media requests, and API / research credentials.
    - Detailed project submission form for building owners and energy advisors.
+
+---
+
+## 🗄️ Case studies: Retrofit Canada API → Supabase → this site
+
+Case studies are **not** stored in the repo. They come from Retrofit Canada's public API
+(`https://portal.retrofitcanada.com/api/v1`, Swagger at `/api/documentation`, no key needed):
+
+```
+Vercel Cron (daily) ──> /api/cron/sync-case-studies ──> Retrofit Canada API (only if last sync ≥ 30 days ago)
+                                                   └──> Supabase table case_studies
+Website pages + AI advisor ──> Supabase (publishable key, read-only) ──> cached by Next.js for a day
+```
+
+- The sync downloads the list (`GET /caseStudies`) and then every case study in full
+  (`GET /caseStudies/lookup/{slug}`), because the list leaves out most fields.
+- New case studies are added, changed ones updated, and ones the API stops listing are hidden
+  (`is_active = false`), not deleted. Each run is logged in `sync_runs`.
+- If any download fails, nothing is changed and the next day's cron tries again.
+- `raw` keeps each record exactly as the API sent it; the detail page is built from it by
+  `lib/retrofit-canada/mapper.ts`, using the same labels and number formats as retrofitcanada.com.
+
+### One-time setup
+
+1. **Supabase**: create a project (region Canada (Central)). In **SQL Editor → New query**, paste
+   `supabase/migrations/20261127130000_case_studies.sql` and click **Run**.
+2. **Keys**: copy `.env.example` to `.env.local` and fill in `SUPABASE_URL`,
+   `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY` (Project Settings → API Keys) and a
+   `CRON_SECRET` you make up. **Never commit `.env.local` or share the secret key.**
+3. **Vercel**: add the same four variables in Project → Settings → Environment Variables, then redeploy.
+4. **First fill**: Vercel → Project → Settings → Cron Jobs → **Run** (or locally: `npm run dev`,
+   then in a second terminal `npm run sync:case-studies`). Supabase now has every case study.
+
+After that it runs by itself. To refresh early: `npm run sync:case-studies` (local) or
+`npm run sync:case-studies -- https://<your-app>.vercel.app`.
+
+### Tests (no keys or network needed)
+
+```bash
+npm test   # database security rules on real Postgres (PGlite) + the whole sync pipeline with a fake API
+```
 
 ---
 

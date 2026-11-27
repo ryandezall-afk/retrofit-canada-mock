@@ -23,6 +23,8 @@ function getSourceLabel(source: string): string {
   switch (source) {
     case "ai_estimate":
       return "AI Estimate";
+    case "retrofit_canada_api":
+      return "Retrofit Canada Case Study";
     case "retrofit_canada_mock_api":
       return "Mock RC API";
     default:
@@ -108,9 +110,7 @@ export default function AssessmentResults({
 
             <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
               <Database className="h-3.5 w-3.5" />
-              Mock RC API ({result.cacheMeta.cached ? "Cache Hit" : "Synced"} •{" "}
-              {result.cacheMeta.upstreamPings} ping
-              {result.cacheMeta.upstreamPings === 1 ? "" : "s"})
+              Retrofit Canada data ({result.cacheMeta.totalRecordsAvailable} case studies)
             </span>
           </div>
         </div>
@@ -299,8 +299,8 @@ export default function AssessmentResults({
               Similar Retrofit Canada Case Studies
             </h3>
             <p className="mt-1 text-xs text-slate-500">
-              Pulled from the cached Mock Retrofit Canada API (
-              {result.cacheMeta.totalRecordsAvailable} records indexed).
+              From Retrofit Canada&apos;s case study library (
+              {result.cacheMeta.totalRecordsAvailable} published case studies).
             </p>
           </div>
           <Link

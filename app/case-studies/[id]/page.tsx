@@ -6,20 +6,29 @@ import {
   getUnifiedCaseStudyBySlug,
 } from "@/lib/case-studies";
 
+// Built once, then rebuilt at most daily (and right after each monthly sync).
+// A case study added after the last build is built the first time someone opens it.
+export const revalidate = 86400;
+
 interface CaseStudyPageProps {
   params: {
     id: string;
   };
 }
 
-export function generateStaticParams() {
-  return getAllCaseStudySlugs().map((slug) => ({
-    id: slug,
-  }));
+export async function generateStaticParams() {
+  const slugs = await getAllCaseStudySlugs();
+  return slugs.map((slug) => ({ id: slug }));
 }
 
-export default function SingleCaseStudyPage({ params }: CaseStudyPageProps) {
-  const study = getUnifiedCaseStudyBySlug(params.id);
+export default async function SingleCaseStudyPage({ params }: CaseStudyPageProps) {
+  let slug = params.id;
+  try {
+    slug = decodeURIComponent(slug);
+  } catch {
+    // already decoded
+  }
+  const study = await getUnifiedCaseStudyBySlug(slug);
 
   if (!study) {
     notFound();
