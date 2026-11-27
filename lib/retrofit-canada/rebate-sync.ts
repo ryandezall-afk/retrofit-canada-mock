@@ -54,6 +54,9 @@ export interface RebateSyncOptions {
   scanRebates?: () => Promise<ScannedRebateProgram[]>;
 }
 
+const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
+const FALLBACK_EXTRACTION_MODELS = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"];
+
 const TRUSTED_EXACT_HOSTS = new Set([
   "abmunis.ca",
   "alberta.ca",
@@ -61,6 +64,8 @@ const TRUSTED_EXACT_HOSTS = new Set([
   "betterhomesbc.ca",
   "calgary.ca",
   "canada.ca",
+  "changeforclimate.ca",
+  "cmhc-schl.gc.ca",
   "edmonton.ca",
   "efficiencymb.ca",
   "efficiencyns.ca",
@@ -85,8 +90,10 @@ const TRUSTED_EXACT_HOSTS = new Set([
 const TRUSTED_HOST_SUFFIXES = [
   ".canada.ca",
   ".gc.ca",
+  ".cmhc-schl.gc.ca",
   ".alberta.ca",
   ".abmunis.ca",
+  ".changeforclimate.ca",
   ".gov.bc.ca",
   ".gov.ab.ca",
   ".gov.on.ca",
@@ -144,21 +151,64 @@ function slugify(value: string): string {
     .slice(0, 72);
 }
 
-interface RegionTarget {
+export interface RegionTarget {
   code: string;
   label: string;
+  sourceUrls?: string[];
 }
 
 const REGION_TARGETS: RegionTarget[] = [
-  { code: "ALL", label: "Federal / Canada-wide residential retrofit loans and grants (such as Canada Greener Homes Loan, OHPA)" },
-  { code: "AB", label: "Alberta & municipal residential retrofit programs (such as CEIP Alberta, Calgary, Edmonton, utility rebates)" },
-  { code: "BC", label: "British Columbia residential retrofit rebates and loans (such as CleanBC Better Homes, BC Hydro, FortisBC)" },
-  { code: "ON", label: "Ontario residential retrofit rebates and loans (such as Home Renovation Savings, Enbridge, provincial programs)" },
+  {
+    code: "ALL",
+    label: "Federal / Canada-wide residential retrofit loans and grants (such as Canada Greener Homes Loan, OHPA, Canada Greener Homes Affordability Program)",
+    sourceUrls: [
+      "https://www.canada.ca/en/environment-climate-change/services/energy-efficiency/home-energy-efficiency/canada-greener-homes-initiative.html",
+      "https://www.canada.ca/en/environment-climate-change/services/energy-efficiency/home-energy-efficiency/canada-greener-homes-initiative/canada-greener-homes-loan.html",
+      "https://www.canada.ca/en/environment-climate-change/services/energy-efficiency/home-energy-efficiency/canada-greener-homes-initiative/oil-heat-pump-affordability-program.html",
+      "https://www.canada.ca/en/environment-climate-change/services/energy-efficiency/home-energy-efficiency/canada-greener-homes-initiative/canada-greener-homes-affordability-program.html",
+    ],
+  },
+  {
+    code: "AB",
+    label: "Alberta & municipal residential retrofit programs (such as CEIP Alberta, Calgary, Edmonton Change Homes for Climate, utility rebates)",
+    sourceUrls: [
+      "https://ceip.abmunis.ca/",
+      "https://www.calgary.ca/environment/programs/clean-energy-improvement-program.html",
+      "https://homes.changeforclimate.ca/",
+    ],
+  },
+  {
+    code: "BC",
+    label: "British Columbia residential retrofit rebates and loans (such as CleanBC Better Homes, BC Hydro, FortisBC)",
+    sourceUrls: [
+      "https://www.betterhomesbc.ca/",
+      "https://www.bchydro.com/powersmart/residential/rebates-programs.html",
+      "https://www.fortisbc.com/rebates-and-energy-savings/rebates-and-offers",
+    ],
+  },
+  {
+    code: "ON",
+    label: "Ontario residential retrofit rebates and loans (such as Home Renovation Savings, Enbridge Gas, provincial programs)",
+    sourceUrls: [
+      "https://www.homerenovationsavings.ca/",
+      "https://www.enbridgegas.com/ontario/rebates-energy-conservation",
+    ],
+  },
+  {
+    code: "NS",
+    label: "Nova Scotia residential energy efficiency rebates and heat pump programs (Efficiency Nova Scotia)",
+    sourceUrls: ["https://www.efficiencyns.ca/"],
+  },
+  {
+    code: "MB",
+    label: "Manitoba residential energy efficiency rebates and home upgrade programs (Efficiency Manitoba)",
+    sourceUrls: ["https://www.efficiencymb.ca/"],
+  },
 ];
 
 interface GeminiGenerateResponse {
   candidates?: Array<{
-    content?: { parts?: Array<{ text?: string }> };
+    content?: { parts?: Array<{ text?: string; thought?: boolean }> };
     groundingMetadata?: {
       groundingChunks?: Array<{
         web?: { uri?: string; title?: string };
@@ -181,6 +231,16 @@ interface RawGeminiRebateItem {
   status?: string;
 }
 
+class GeminiApiError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string
+  ) {
+    super(message);
+    this.name = "GeminiApiError";
+  }
+}
+
 async function callGemini(
   apiKey: string,
   model: string,
@@ -190,22 +250,269 @@ async function callGemini(
 ): Promise<GeminiGenerateResponse> {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
-  )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  )}:generateContent`;
 
-  const res = await fetchImpl(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(timeoutMs),
-    body: JSON.stringify(body),
-  });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetchImpl(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey,
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+      body: JSON.stringify(body),
+    });
 
-  if (!res.ok) {
-    throw new Error(`Gemini rebate scan returned HTTP ${res.status}`);
+    if (res.ok) {
+      return (await res.json()) as GeminiGenerateResponse;
+    }
+
+    const detail = await res.text().catch(() => "");
+    if (attempt === 0 && (res.status === 502 || res.status === 503 || res.status === 504)) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      continue;
+    }
+
+    throw new GeminiApiError(
+      res.status,
+      `Gemini rebate scan returned HTTP ${res.status}${detail ? `: ${detail.slice(0, 250)}` : ""}`
+    );
   }
-  return (await res.json()) as GeminiGenerateResponse;
+
+  throw new GeminiApiError(503, "Gemini rebate scan failed after retry");
 }
 
-export async function scanRebatesForRegion(
+function extractGeminiText(response: GeminiGenerateResponse): string {
+  return (response.candidates?.[0]?.content?.parts ?? [])
+    .filter((p) => !p.thought && typeof p.text === "string")
+    .map((p) => p.text ?? "")
+    .join("")
+    .trim();
+}
+
+function stripHtmlToText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<svg[\s\S]*?<\/svg>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&ndash;|&#8211;/gi, "-")
+    .replace(/&mdash;|&#8212;/gi, "-")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+interface FetchedOfficialPage {
+  regionCode: string;
+  url: string;
+  text: string;
+}
+
+async function fetchOfficialPages(
+  targets: RegionTarget[],
+  fetchImpl: typeof fetch,
+  timeoutMs: number
+): Promise<FetchedOfficialPage[]> {
+  const jobs: Array<{ regionCode: string; url: string }> = [];
+  for (const target of targets) {
+    const urls = target.sourceUrls ?? [];
+    for (const url of urls) {
+      if (isTrustedProgramUrl(url)) {
+        jobs.push({ regionCode: target.code, url });
+      }
+    }
+  }
+
+  const settled = await Promise.allSettled(
+    jobs.map(async ({ regionCode, url }): Promise<FetchedOfficialPage | null> => {
+      const res = await fetchImpl(url, {
+        redirect: "follow",
+        signal: AbortSignal.timeout(Math.min(timeoutMs, 12_000)),
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; RetrofitCanadaBot/1.0)" },
+      });
+      if (!res.ok || res.status === 202) return null;
+      const finalUrl = res.url && isTrustedProgramUrl(res.url) ? res.url : url;
+      const html = await res.text();
+      const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const title = titleMatch ? titleMatch[1].trim() : "";
+      if (/^(page\s+not\s+found|not\s+found|404|radware|access\s+denied)/i.test(title)) {
+        return null;
+      }
+      const text = stripHtmlToText(html);
+      if (text.length < 200) return null;
+      return { regionCode, url: finalUrl, text: text.slice(0, 3500) };
+    })
+  );
+
+  return settled
+    .filter(
+      (item): item is PromiseFulfilledResult<FetchedOfficialPage | null> =>
+        item.status === "fulfilled" && item.value !== null
+    )
+    .map((item) => item.value!);
+}
+
+function normalizeRawPrograms(
+  items: RawGeminiRebateItem[],
+  fallbackProvince: string,
+  extraSourceUrls: string[]
+): ScannedRebateProgram[] {
+  const normalized: ScannedRebateProgram[] = [];
+  for (const item of items) {
+    const name = item.name?.trim();
+    const url = item.url?.trim() ?? "";
+    if (!name || !isTrustedProgramUrl(url)) continue;
+
+    const province = (item.province?.trim().toUpperCase() || fallbackProvince).slice(0, 3);
+    const level: RebateLevel =
+      item.level && VALID_LEVELS.has(item.level as RebateLevel)
+        ? (item.level as RebateLevel)
+        : province === "ALL"
+          ? "Federal"
+          : "Provincial";
+
+    const status: RebateStatus =
+      item.status && VALID_STATUSES.has(item.status as RebateStatus)
+        ? (item.status as RebateStatus)
+        : "active";
+
+    const slug = slugify(item.slug?.trim() || `${province}-${name}`);
+    if (!slug) continue;
+
+    normalized.push({
+      slug,
+      name,
+      level,
+      province,
+      city: item.city?.trim() || null,
+      summary: item.summary?.trim() || name,
+      estimatedValue: item.estimatedValue?.trim() || "Program dependent",
+      eligibilityNotes:
+        item.eligibilityNotes?.trim() ||
+        "Verify current intake and pre-retrofit audit rules on the official program page.",
+      eligibleUpgrades: Array.isArray(item.eligibleUpgrades)
+        ? item.eligibleUpgrades.filter((u): u is string => typeof u === "string" && Boolean(u.trim()))
+        : [],
+      url,
+      sourceUrls: Array.from(new Set([url, ...extraSourceUrls])).slice(0, 6),
+      status,
+    });
+  }
+
+  return normalized;
+}
+
+async function extractProgramsFromOfficialPages(
+  targets: RegionTarget[],
+  pages: FetchedOfficialPage[],
+  apiKey: string,
+  model: string,
+  fetchImpl: typeof fetch,
+  timeoutMs: number
+): Promise<ScannedRebateProgram[]> {
+  if (pages.length === 0) {
+    throw new Error("Could not fetch any live official rebate pages.");
+  }
+
+  const targetList = targets.map((t) => `- ${t.code}: ${t.label}`).join("\n");
+  const sourceExcerpts = pages
+    .map((p) => `### [${p.regionCode}] ${p.url}\n${p.text}`)
+    .join("\n\n");
+
+  const promptText = `Extract residential home energy-efficiency retrofit rebates, grants, and clean-energy financing programs from the live official Canadian government, municipal, and utility web pages below.
+Return JSON matching:
+{
+  "programs": [
+    {
+      "slug": "short-kebab-slug",
+      "name": "Official Program Name",
+      "level": "Federal" | "Provincial" | "Municipal" | "Utility",
+      "province": "ALL" | "AB" | "BC" | "ON" | "NS" | "MB",
+      "city": null,
+      "summary": "1-2 sentence plain summary",
+      "estimatedValue": "e.g. Up to $40,000 (0% APR loan) or Measure dependent",
+      "eligibilityNotes": "Key eligibility condition and intake note",
+      "eligibleUpgrades": ["Heat Pump", "Insulation", "Air Sealing"],
+      "url": "https://exact-source-url-from-above",
+      "status": "active" | "waitlist" | "closed"
+    }
+  ]
+}
+
+Target regions:
+${targetList}
+
+Rules:
+- Extract each distinct residential retrofit grant, rebate, or financing program covered by the live pages below (including federal, provincial, municipal, utility, and programs whose intake has closed). Do not invent dollar amounts or URLs.
+- Every "url" MUST be one of the official https:// URLs provided below (or a direct trusted subdomain path from the page).
+- Set "status" to "closed" if the page states new applications are closed; set "waitlist" if paused/waitlisted; otherwise "active".
+- For federal programs use province "ALL"; for provincial/municipal/utility programs use the matching 2-letter province code.
+
+Live official pages:
+${sourceExcerpts}`;
+
+  const candidates = Array.from(new Set([model, ...FALLBACK_EXTRACTION_MODELS]));
+  let jsonResponse: GeminiGenerateResponse | undefined;
+  let lastError: unknown;
+
+  for (const candidateModel of candidates) {
+    try {
+      jsonResponse = await callGemini(
+        apiKey,
+        candidateModel,
+        {
+          generationConfig: {
+            temperature: 0.1,
+            responseMimeType: "application/json",
+            ...(candidateModel.startsWith("gemini-3")
+              ? { thinkingConfig: { thinkingLevel: "minimal" } }
+              : {}),
+          },
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: promptText }],
+            },
+          ],
+        },
+        fetchImpl,
+        Math.max(timeoutMs, 30_000)
+      );
+      break;
+    } catch (err) {
+      lastError = err;
+      const isRetryableModelErr =
+        (err instanceof GeminiApiError &&
+          (err.status === 429 || err.status === 404 || err.status === 503)) ||
+        (err instanceof Error && err.name === "TimeoutError");
+      if (!isRetryableModelErr) throw err;
+    }
+  }
+
+  if (!jsonResponse) {
+    throw lastError instanceof Error ? lastError : new Error("Gemini rebate extraction failed.");
+  }
+
+  const rawJsonText = extractGeminiText(jsonResponse);
+  if (!rawJsonText) return [];
+
+  const parsed = JSON.parse(rawJsonText) as { programs?: RawGeminiRebateItem[] };
+  const items = Array.isArray(parsed.programs) ? parsed.programs : [];
+  const fetchedUrls = pages.map((p) => p.url);
+  return normalizeRawPrograms(items, targets[0]?.code ?? "ALL", fetchedUrls);
+}
+
+function isGroundingFallbackStatus(err: unknown): err is GeminiApiError {
+  return (
+    err instanceof GeminiApiError &&
+    (err.status === 429 || err.status === 403 || err.status === 400)
+  );
+}
+
+async function scanRebatesViaGrounding(
   region: RegionTarget,
   options: RebateScanOptions = {}
 ): Promise<ScannedRebateProgram[]> {
@@ -213,9 +520,9 @@ export async function scanRebatesForRegion(
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY is not configured.");
   }
-  const model = options.model ?? (process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash");
+  const model = options.model ?? (process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL);
   const fetchImpl = options.fetchImpl ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 20_000;
+  const timeoutMs = options.timeoutMs ?? 25_000;
 
   // Step 1: Grounded Google Search for currently open/closed programs
   const searchResponse = await callGemini(
@@ -240,11 +547,7 @@ export async function scanRebatesForRegion(
     timeoutMs
   );
 
-  const searchText =
-    searchResponse.candidates?.[0]?.content?.parts
-      ?.map((p) => p.text ?? "")
-      .join("\n")
-      .trim() ?? "";
+  const searchText = extractGeminiText(searchResponse);
 
   const groundingUrls = (
     searchResponse.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []
@@ -305,70 +608,99 @@ ${JSON.stringify(groundingUrls)}`,
     timeoutMs
   );
 
-  const rawJsonText =
-    jsonResponse.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? "";
+  const rawJsonText = extractGeminiText(jsonResponse);
   if (!rawJsonText) return [];
 
   const parsed = JSON.parse(rawJsonText) as { programs?: RawGeminiRebateItem[] };
   const items = Array.isArray(parsed.programs) ? parsed.programs : [];
+  return normalizeRawPrograms(items, region.code, groundingUrls);
+}
 
-  const normalized: ScannedRebateProgram[] = [];
-  for (const item of items) {
-    const name = item.name?.trim();
-    const url = item.url?.trim() ?? "";
-    if (!name || !isTrustedProgramUrl(url)) continue;
-
-    const level: RebateLevel =
-      item.level && VALID_LEVELS.has(item.level as RebateLevel)
-        ? (item.level as RebateLevel)
-        : region.code === "ALL"
-          ? "Federal"
-          : "Provincial";
-
-    const status: RebateStatus =
-      item.status && VALID_STATUSES.has(item.status as RebateStatus)
-        ? (item.status as RebateStatus)
-        : "active";
-
-    const province = (item.province?.trim().toUpperCase() || region.code).slice(0, 3);
-    const slug = slugify(item.slug?.trim() || `${province}-${name}`);
-    if (!slug) continue;
-
-    normalized.push({
-      slug,
-      name,
-      level,
-      province,
-      city: item.city?.trim() || null,
-      summary: item.summary?.trim() || name,
-      estimatedValue: item.estimatedValue?.trim() || "Program dependent",
-      eligibilityNotes:
-        item.eligibilityNotes?.trim() ||
-        "Verify current intake and pre-retrofit audit rules on the official program page.",
-      eligibleUpgrades: Array.isArray(item.eligibleUpgrades)
-        ? item.eligibleUpgrades.filter((u): u is string => typeof u === "string" && Boolean(u.trim()))
-        : [],
-      url,
-      sourceUrls: Array.from(new Set([url, ...groundingUrls])).slice(0, 6),
-      status,
-    });
+export async function scanRebatesForRegion(
+  region: RegionTarget,
+  options: RebateScanOptions = {}
+): Promise<ScannedRebateProgram[]> {
+  try {
+    return await scanRebatesViaGrounding(region, options);
+  } catch (err) {
+    if (!isGroundingFallbackStatus(err)) throw err;
+    const apiKey = options.apiKey ?? process.env.GEMINI_API_KEY?.trim() ?? "";
+    const model = options.model ?? (process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL);
+    const fetchImpl = options.fetchImpl ?? fetch;
+    const timeoutMs = options.timeoutMs ?? 25_000;
+    const target =
+      region.sourceUrls?.length
+        ? region
+        : REGION_TARGETS.find((r) => r.code === region.code) ?? region;
+    const pages = await fetchOfficialPages([target], fetchImpl, timeoutMs);
+    return await extractProgramsFromOfficialPages(
+      [target],
+      pages,
+      apiKey,
+      model,
+      fetchImpl,
+      timeoutMs
+    );
   }
-
-  return normalized;
 }
 
 export async function scanAllCanadianRebates(
   options: RebateScanOptions = {}
 ): Promise<ScannedRebateProgram[]> {
+  const apiKey = options.apiKey ?? process.env.GEMINI_API_KEY?.trim() ?? "";
+  if (!apiKey) {
+    throw new Error("GEMINI_API_KEY is not configured.");
+  }
+  const model = options.model ?? (process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL);
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 25_000;
+  const useSearchGrounding = process.env.GEMINI_SEARCH_GROUNDING === "true";
+
   const bySlug = new Map<string, ScannedRebateProgram>();
-  for (const region of REGION_TARGETS) {
-    const programs = await scanRebatesForRegion(region, options);
+  const addPrograms = (programs: ScannedRebateProgram[]) => {
     for (const prog of programs) {
       if (!bySlug.has(prog.slug)) {
         bySlug.set(prog.slug, prog);
       }
     }
+  };
+
+  if (!useSearchGrounding) {
+    const pages = await fetchOfficialPages(REGION_TARGETS, fetchImpl, timeoutMs);
+    const programs = await extractProgramsFromOfficialPages(
+      REGION_TARGETS,
+      pages,
+      apiKey,
+      model,
+      fetchImpl,
+      timeoutMs
+    );
+    addPrograms(programs);
+    return Array.from(bySlug.values());
   }
+
+  for (let i = 0; i < REGION_TARGETS.length; i++) {
+    try {
+      const programs = await scanRebatesViaGrounding(REGION_TARGETS[i], options);
+      addPrograms(programs);
+    } catch (err) {
+      // If Gemini Search Grounding isn't enabled or hits quota mid-way, scan remaining regions in one batch from official pages.
+      if (!isGroundingFallbackStatus(err)) throw err;
+      const remaining = REGION_TARGETS.slice(i);
+      const pages = await fetchOfficialPages(remaining, fetchImpl, timeoutMs);
+      const programs = await extractProgramsFromOfficialPages(
+        remaining,
+        pages,
+        apiKey,
+        model,
+        fetchImpl,
+        timeoutMs
+      );
+      addPrograms(programs);
+      break;
+    }
+  }
+
   return Array.from(bySlug.values());
 }
 

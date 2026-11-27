@@ -47,6 +47,7 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 // 1. Domain allowlist checks
 check("accepts official gc.ca URL", isTrustedProgramUrl("https://natural-resources.canada.ca/test"));
 check("accepts AB CEIP URL", isTrustedProgramUrl("https://ceip.abmunis.ca/"));
+check("accepts Edmonton Change Homes URL", isTrustedProgramUrl("https://homes.changeforclimate.ca/"));
 check("rejects http:// URL", !isTrustedProgramUrl("http://canada.ca/test"));
 check("rejects contractor blog URL", !isTrustedProgramUrl("https://bob-hvac-pros.com/rebates"));
 
@@ -161,6 +162,69 @@ check(
   "sourceUrls excludes untrusted domain",
   scanned[0].sourceUrls.length === 1 && scanned[0].sourceUrls[0] === "https://ceip.abmunis.ca/"
 );
+
+// 4b. Test HTTP 429 on google_search falls back to official page fetch + standard gemini-3.5-flash
+let usedModelUrl = "";
+const fakeFallbackFetch = (async (input: RequestInfo | URL) => {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  if (url.includes("generativelanguage.googleapis.com") && !usedModelUrl) {
+    usedModelUrl = url;
+    return new Response(JSON.stringify({ error: { code: 429, status: "RESOURCE_EXHAUSTED" } }), {
+      status: 429,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  if (url.startsWith("https://ceip.abmunis.ca") || url.startsWith("https://www.calgary.ca") || url.startsWith("https://homes.changeforclimate.ca")) {
+    return new Response(
+      `<html><head><title>CEIP Alberta</title></head><body><main>${"Clean Energy Improvement Program property tax financing in Alberta municipalities. ".repeat(6)}</main></body></html>`,
+      { status: 200, headers: { "content-type": "text/html" } }
+    );
+  }
+  if (url.includes("generativelanguage.googleapis.com")) {
+    return new Response(
+      JSON.stringify({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    programs: [
+                      {
+                        slug: "ab-ceip",
+                        name: "CEIP Alberta",
+                        level: "Municipal",
+                        province: "AB",
+                        summary: "Property-tax clean energy financing.",
+                        estimatedValue: "Up to 100%",
+                        eligibilityNotes: "Participating municipalities.",
+                        eligibleUpgrades: ["Heat Pump", "Insulation"],
+                        url: "https://ceip.abmunis.ca/",
+                        status: "active",
+                      },
+                    ],
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  }
+  throw new Error(`Unexpected URL in fallback test: ${url}`);
+}) as typeof fetch;
+
+const prevGeminiModel = process.env.GEMINI_MODEL;
+delete process.env.GEMINI_MODEL;
+const scannedFallback = await scanRebatesForRegion(
+  { code: "AB", label: "Alberta" },
+  { apiKey: "fake-key", fetchImpl: fakeFallbackFetch }
+);
+if (prevGeminiModel !== undefined) process.env.GEMINI_MODEL = prevGeminiModel;
+check("defaults to gemini-3.5-flash when GEMINI_MODEL is unset", usedModelUrl.includes("gemini-3.5-flash"), usedModelUrl);
+check("429 on google_search falls back to official pages", scannedFallback.length === 1 && scannedFallback[0].slug === "ab-ceip", scannedFallback);
 
 // 5. Sync + 30-day guard
 const day1 = new Date("2026-11-01T10:00:00Z");
