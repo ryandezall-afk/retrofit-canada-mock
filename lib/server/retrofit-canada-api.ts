@@ -1,28 +1,12 @@
-import allCaseStudiesRaw from "@/data/all_case_studies.json";
-import { CASE_STUDIES } from "@/data/case-studies";
+import {
+  getAllUnifiedCaseStudies,
+  type RawPortalCaseStudy,
+} from "@/lib/case-studies";
 import type {
   MatchedCaseStudySummary,
   MockCaseStudyRecord,
   QuestionnaireAnswers,
 } from "@/types";
-
-interface RawPortalCaseStudy {
-  id: number;
-  title: string;
-  name?: string;
-  link: string;
-  image?: string;
-  created?: string;
-  yearBuilt?: number;
-  province?: string;
-  houseType?: string;
-  structureType?: string;
-  climateZone?: string;
-  retrofitPhasing?: string;
-  retrofitType?: string;
-  performanceLevel?: string;
-  team?: string;
-}
 
 interface CacheState {
   records: MockCaseStudyRecord[];
@@ -87,90 +71,48 @@ export function inferProvinceFromPostalCode(postalCode?: string): string {
   }
 }
 
-function inferHouseTypeFromTitle(title: string): string {
-  const lower = title.toLowerCase();
-  if (lower.includes("bungalow")) return "Single-Family Bungalow (incl. 1.5 Story)";
-  if (lower.includes("split")) return "Single-Family Split-Level";
-  if (lower.includes("bi-level")) return "Single-Family Bi-Level";
-  if (lower.includes("town") || lower.includes("row")) return "Row/Townhouse";
-  if (lower.includes("duplex") || lower.includes("semi")) return "Duplex or Semi-Detached";
-  return "Single-Family 2+ Stories";
-}
-
 function normalizePortalRecords(): MockCaseStudyRecord[] {
-  const rawList = allCaseStudiesRaw as RawPortalCaseStudy[];
+  return getAllUnifiedCaseStudies().map((item) => {
+    const details = item.fullDetails;
+    const metrics = item.metrics;
+    const hasMetrics =
+      metrics.beforeGj !== undefined ||
+      metrics.afterGj !== undefined ||
+      metrics.energyReductionPercent !== undefined;
 
-  const portalRecords: MockCaseStudyRecord[] = rawList
-    .filter((item) => Boolean(item.title && item.link))
-    .map((item) => {
-      const slug = item.link.replace(/^\/case-studies\//, "") || `rc-${item.id}`;
-      const houseType = item.houseType?.trim()
-        ? item.houseType.trim()
-        : inferHouseTypeFromTitle(item.title);
+    const lessonsSection = details?.sections.find((s) =>
+      s.heading.toLowerCase().includes("lesson")
+    );
 
-      return {
-        id: `portal-${item.id}`,
-        externalId: item.id,
-        title: item.title.trim(),
-        slug,
-        link: item.link.startsWith("http")
-          ? item.link
-          : `https://retrofitcanada.com${item.link}`,
-        imageUrl: item.image?.trim() ?? "",
-        created: item.created?.trim() ?? "",
-        yearBuilt:
-          typeof item.yearBuilt === "number" && item.yearBuilt > 1700
-            ? item.yearBuilt
-            : null,
-        province: item.province?.trim().toUpperCase() || "AB",
-        houseType,
-        structureType: item.structureType?.trim() || "Wood-Framed",
-        climateZone: item.climateZone?.trim() || "",
-        retrofitPhasing: item.retrofitPhasing?.trim() || "No",
-        retrofitType: item.retrofitType?.trim() || "Envelope and Mechanical",
-        performanceLevel: item.performanceLevel?.trim() || "Other",
-        team: item.team?.trim() || "",
-        hasDetailedMetrics: false,
-        source: "retrofit_canada_mock_api",
-      };
-    });
-
-  // Merge detailed sample case studies so AI grounding has real GJ/cost/savings examples
-  const detailedRecords: MockCaseStudyRecord[] = CASE_STUDIES.map((study, idx) => {
-    const parsedYear = Number.parseInt(study.vintage, 10);
     return {
-      id: `sample-${study.id}`,
-      externalId: 1000 + idx + 1,
-      title: study.title,
-      slug: study.slug,
-      link: `/case-studies/${study.slug}`,
-      imageUrl: study.imageUrl,
-      created: "2026-01-01",
-      yearBuilt: Number.isFinite(parsedYear) ? parsedYear : null,
-      province: study.province,
-      city: study.city,
-      houseType: study.buildingType,
-      structureType: study.structure,
-      climateZone: study.climateZone,
-      retrofitPhasing: "No",
-      retrofitType: study.retrofitType,
-      performanceLevel: study.performanceLevel,
-      team: study.contractor,
-      beforeGj: study.beforeGj,
-      afterGj: study.afterGj,
-      energyReductionPercent: study.energyReductionPercent,
-      totalGrossCost: study.financials.totalGrossCost,
-      grantRebatesTotal: study.financials.grantRebatesTotal,
-      netCost: study.financials.netCost,
-      annualUtilitySavings: study.financials.annualUtilitySavings,
-      summary: study.summary,
-      lessonsLearned: study.lessonsLearned,
-      hasDetailedMetrics: true,
-      source: "sample_data",
+      id: `rc-${item.id}`,
+      externalId: item.id,
+      title: item.title,
+      slug: item.slug,
+      link: item.internalLink,
+      imageUrl: item.imageUrl,
+      created: item.created,
+      yearBuilt: item.yearBuilt,
+      province: item.province,
+      city: metrics.location,
+      houseType: item.houseType,
+      structureType: item.structureType,
+      climateZone: item.climateZone,
+      retrofitPhasing: item.retrofitPhasing,
+      retrofitType: item.retrofitType,
+      performanceLevel: item.performanceLevel,
+      team: item.teamMembers.join("|"),
+      beforeGj: metrics.beforeGj,
+      afterGj: metrics.afterGj,
+      energyReductionPercent: metrics.energyReductionPercent,
+      summary: details?.intro || undefined,
+      lessonsLearned: lessonsSection
+        ? [...lessonsSection.paragraphs, ...lessonsSection.bullets]
+        : undefined,
+      hasDetailedMetrics: hasMetrics,
+      source: "retrofit_canada_mock_api",
     };
   });
-
-  return [...detailedRecords, ...portalRecords];
 }
 
 /**
