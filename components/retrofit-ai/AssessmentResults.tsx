@@ -245,10 +245,54 @@ export default function AssessmentResults({
                   {rec.eligibleRebates.join(" • ")}
                 </p>
               )}
+
+              {rec.supportingCaseStudies && rec.supportingCaseStudies.length > 0 && (
+                <p className="mt-1.5 text-xs text-slate-500">
+                  <span className="font-semibold text-slate-700">
+                    Based on:
+                  </span>{" "}
+                  {rec.supportingCaseStudies.map((ref, i) => {
+                    const link = result.matchedCaseStudies.find(
+                      (cs) => cs.id === ref.id
+                    )?.link;
+                    return (
+                      <span key={ref.id}>
+                        {i > 0 && " • "}
+                        {link ? (
+                          <Link href={link} className="text-rc-red hover:underline">
+                            {ref.title}
+                          </Link>
+                        ) : (
+                          ref.title
+                        )}
+                      </span>
+                    );
+                  })}
+                </p>
+              )}
             </div>
           ))}
         </div>
       </div>
+
+      {/* Next steps */}
+      {result.nextSteps && result.nextSteps.length > 0 && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-md sm:p-8 print:break-inside-avoid print:shadow-none">
+          <h3 className="font-saira text-xl font-bold text-rc-navy">
+            Your Next Steps
+          </h3>
+          <ol className="mt-4 space-y-2.5">
+            {result.nextSteps.map((step, i) => (
+              <li key={i} className="flex items-start gap-3 text-sm text-slate-700">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-rc-navy text-xs font-bold text-white">
+                  {i + 1}
+                </span>
+                <span className="pt-0.5">{step}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
 
       {/* Rebates & Financing */}
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-md sm:p-8 print:break-inside-avoid print:shadow-none">
