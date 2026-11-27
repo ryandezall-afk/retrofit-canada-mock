@@ -26,7 +26,7 @@ export function Navbar() {
   };
 
   return (
-    <header className="sticky top-0 z-50 w-full bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)] border-b border-slate-100">
+    <header className="sticky top-0 z-50 w-full bg-white shadow-[0_2px_10px_rgba(0,0,0,0.06)] border-b border-slate-100 print:hidden">
       <div className="max-w-[1340px] mx-auto px-6 lg:px-12 py-5 flex items-center justify-between">
         {/* Exact Retrofit Canada SVG Logo */}
         <Link href="/" className="block">

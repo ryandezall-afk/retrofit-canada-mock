@@ -50,3 +50,16 @@ h1, h2, h3, h4, h5, h6 {
   background: rgba(46, 50, 73, 0.4);
   border-radius: 9999px;
 }
+
+@media print {
+  @page {
+    size: letter;
+    margin: 0.5in;
+  }
+
+  body {
+    background: #ffffff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

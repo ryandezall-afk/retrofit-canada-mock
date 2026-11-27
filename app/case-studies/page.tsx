@@ -375,10 +375,8 @@ export default function CaseStudiesPage() {
                     key={study.id}
                     className="group flex flex-col justify-between rounded-xl overflow-hidden bg-white border border-gray-200 hover:shadow-lg transition-all duration-200"
                   >
-                    <a
-                      href={study.link.startsWith('http') ? study.link : `https://retrofitcanada.com${study.link}`}
-                      target="_blank"
-                      rel="noreferrer noopener"
+                    <Link
+                      href={study.link.startsWith('/') ? study.link : `/case-studies/${study.id}`}
                       className="block"
                     >
                       {/* Image container */}
@@ -407,7 +405,7 @@ export default function CaseStudiesPage() {
                           </span>
                         )}
                       </div>
-                    </a>
+                    </Link>
                   </div>
                 ))}
               </div>

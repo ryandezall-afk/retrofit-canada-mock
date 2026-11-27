@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 export default function RetrofitAiPage() {
   return (
     <section className="mx-auto max-w-[1340px] px-4 py-12 sm:px-6 sm:py-16 lg:px-12">
-      <div className="mx-auto max-w-xl text-center">
+      <div className="mx-auto max-w-xl text-center print:hidden">
         <h1 className="font-saira text-3xl font-bold text-rc-navy sm:text-5xl">
           Retrofit AI
         </h1>
